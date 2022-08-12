@@ -15,8 +15,12 @@ defmodule Plausible.Application do
       Plausible.Event.WriteBuffer,
       Plausible.Session.WriteBuffer,
       ReferrerBlocklist,
-      Supervisor.child_spec({Cachex, name: :user_agents, limit: 1000}, id: :cachex_user_agents),
-      Supervisor.child_spec({Cachex, name: :sessions, limit: nil}, id: :cachex_sessions),
+      Supervisor.child_spec({Cachex, name: :user_agents, limit: 1000, stats: true},
+        id: :cachex_user_agents
+      ),
+      Supervisor.child_spec({Cachex, name: :sessions, limit: nil, stats: true},
+        id: :cachex_sessions
+      ),
       PlausibleWeb.Endpoint,
       {Oban, Application.get_env(:plausible, Oban)},
       Plausible.PromEx
@@ -24,7 +28,6 @@ defmodule Plausible.Application do
 
     opts = [strategy: :one_for_one, name: Plausible.Supervisor]
     setup_sentry()
-    setup_cache_stats()
     OpentelemetryPhoenix.setup()
     OpentelemetryEcto.setup([:plausible, :repo])
     OpentelemetryEcto.setup([:plausible, :clickhouse_repo])
@@ -56,21 +59,13 @@ defmodule Plausible.Application do
     end
   end
 
-  defp setup_cache_stats() do
-    conf = Application.get_env(:plausible, :user_agent_cache)
-
-    if conf[:stats] do
-      :timer.apply_interval(1000 * 10, Plausible.Application, :report_cache_stats, [])
-    end
-  end
-
   def setup_sentry() do
     Logger.add_backend(Sentry.LoggerBackend)
 
     :telemetry.attach_many(
       "oban-errors",
       [[:oban, :job, :exception], [:oban, :notifier, :exception], [:oban, :plugin, :exception]],
-      &ErrorReporter.handle_event/4,
+      &ObanErrorReporter.handle_event/4,
       %{}
     )
   end
