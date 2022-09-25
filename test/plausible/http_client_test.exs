@@ -102,6 +102,36 @@ defmodule Plausible.HTTPClientTest do
              HTTPClient.post(bypass_url(bypass, path: "/any"), headers_no_content_type, params)
   end
 
+  test "non-200 responses are tagged as errors", %{bypass: bypass} do
+    Bypass.expect_once(bypass, "GET", "/get", fn conn ->
+      Conn.resp(conn, 300, "oops")
+    end)
+
+    assert {:error,
+            %HTTPClient.Non200Error{
+              reason: %Finch.Response{status: 300, body: "oops"}
+            }} = HTTPClient.get(bypass_url(bypass, path: "/get"))
+
+    Bypass.expect_once(bypass, "GET", "/get", fn conn ->
+      Conn.resp(conn, 400, "oops")
+    end)
+
+    assert {:error,
+            %HTTPClient.Non200Error{
+              reason: %Finch.Response{status: 400, body: "oops"}
+            }} = HTTPClient.get(bypass_url(bypass, path: "/get"))
+  end
+
+  test "header keys are downcased but values are not", %{bypass: bypass} do
+    Bypass.expect_once(bypass, "GET", "/get", fn conn ->
+      Conn.resp(conn, 200, "ok")
+      |> Conn.put_resp_header("Some-Header", "Header-Value")
+    end)
+
+    assert {:ok, res} = HTTPClient.get(bypass_url(bypass, path: "/get"))
+    assert {"some-header", "Header-Value"} in res.headers
+  end
+
   defp bypass_url(bypass, opts) do
     port = bypass.port
     path = Keyword.get(opts, :path, "/")

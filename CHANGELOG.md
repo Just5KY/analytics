@@ -34,6 +34,8 @@ All notable changes to this project will be documented in this file.
 - New width=manual mode for embedded dashboards plausible/analytics#2148
 - Add more timezone options
 - Add new strategy to recommend timezone when creating a new site
+- Alert outgrown enterprise users of their usage plausible/analytics#2197
+- Manually lock and unlock enterprise users plausible/analytics#2197
 
 ### Fixed
 - Hash part of the URL can now be used when excluding pages with `script.exclusions.hash.js`.
@@ -46,6 +48,8 @@ All notable changes to this project will be documented in this file.
 - Fix a bug where city, region and country filters were filtering stats but not the location list
 - Fix a bug where regions were not being saved
 - Timezone offset labels now update with time changes
+- Render 404 if shared link auth cannot be verified [plausible/analytics#2225](https://github.com/plausible/analytics/pull/2225)
+- Restore compatibility with older format of shared links [plausible/analytics#2225](https://github.com/plausible/analytics/pull/2225)
 
 ### Changed
 - Cache the tracking script for 24 hours

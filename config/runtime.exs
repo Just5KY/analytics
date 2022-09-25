@@ -212,12 +212,6 @@ else
     database: get_var_from_path_or_env(config_dir, "DATABASE_NAME", "plausible")
 end
 
-config :fun_with_flags, :cache_bust_notifications, enabled: false
-
-config :fun_with_flags, :persistence,
-  adapter: FunWithFlags.Store.Persistent.Ecto,
-  repo: Plausible.Repo
-
 included_environments = if sentry_dsn, do: ["prod", "staging", "dev"], else: []
 
 config :sentry,
@@ -230,7 +224,8 @@ config :sentry,
   root_source_code_path: [File.cwd!()],
   client: Plausible.Sentry.Client,
   send_max_attempts: 1,
-  filter: Plausible.SentryFilter
+  filter: Plausible.SentryFilter,
+  before_send_event: {Plausible.SentryFilter, :before_send}
 
 config :logger, Sentry.LoggerBackend,
   capture_log_messages: true,
@@ -371,12 +366,6 @@ end
 config :plausible, :hcaptcha,
   sitekey: hcaptcha_sitekey,
   secret: hcaptcha_secret
-
-config :plausible, Plausible.Finch,
-  default_pool_size: get_int_from_path_or_env(config_dir, "DEFAULT_FINCH_POOL_SIZE", 50),
-  default_pool_count: get_int_from_path_or_env(config_dir, "DEFAULT_FINCH_POOL_COUNT", 1),
-  sentry_pool_size: get_int_from_path_or_env(config_dir, "SENTRY_FINCH_POOL_SIZE", 50),
-  sentry_pool_count: get_int_from_path_or_env(config_dir, "SENTRY_FINCH_POOL_COUNT", 1)
 
 config :plausible, Plausible.Sentry.Client,
   finch_request_opts: [

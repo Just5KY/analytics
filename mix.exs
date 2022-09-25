@@ -77,7 +77,7 @@ defmodule Plausible.MixProject do
       {:exvcr, "~> 0.11", only: :test},
       {:finch, "~> 0.12.0", override: true},
       {:floki, "~> 0.32.0", only: :test},
-      {:fun_with_flags, "~> 1.8.1"},
+      {:fun_with_flags, "~> 1.9.0"},
       {:fun_with_flags_ui, "~> 0.8"},
       {:geolix, "~> 2.0"},
       {:geolix_adapter_mmdb2, "~> 0.6.0"},
@@ -88,6 +88,7 @@ defmodule Plausible.MixProject do
       {:kaffy, "~> 0.9.0"},
       {:location, git: "https://github.com/plausible/location.git"},
       {:mimic, "~> 1.7", only: :test},
+      {:mox, "~> 1.0", only: :test},
       {:nanoid, "~> 2.0.2"},
       {:oauther, "~> 1.3"},
       {:oban, "~> 2.11"},
@@ -115,7 +116,7 @@ defmodule Plausible.MixProject do
       {:telemetry, "~> 1.0", override: true},
       {:timex, "~> 3.7"},
       {:ua_inspector, "~> 3.0"},
-      {:ex_doc, "~> 0.28"}
+      {:ex_doc, "~> 0.28", only: :dev, runtime: false}
     ]
   end
 
@@ -135,11 +136,22 @@ defmodule Plausible.MixProject do
       extras:
         Path.wildcard("guides/**/*.md") ++
           [
-            "README.md": [filename: "readme", title: "Introduction"]
+            "README.md": [filename: "readme", title: "Introduction"],
+            "CONTRIBUTING.md": [filename: "contributing", title: "Contributing"]
           ],
       groups_for_extras: [
         Features: Path.wildcard("guides/features/*.md")
-      ]
+      ],
+      before_closing_body_tag: fn
+        :html ->
+          """
+          <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+          <script>mermaid.initialize({startOnLoad: true})</script>
+          """
+
+        _ ->
+          ""
+      end
     ]
   end
 end

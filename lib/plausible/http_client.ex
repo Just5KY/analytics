@@ -1,3 +1,28 @@
+defmodule Plausible.HTTPClient.Non200Error do
+  defstruct reason: nil
+
+  @type t :: %__MODULE__{reason: Finch.Response.t()}
+
+  @spec new(Finch.Response.t()) :: t()
+  def new(%Finch.Response{status: status} = response)
+      when is_integer(status) and (status < 200 or status >= 300) do
+    %__MODULE__{reason: response}
+  end
+end
+
+defmodule Plausible.HTTPClient.Interface do
+  @type url() :: Finch.Request.url()
+  @type headers() :: Finch.Request.headers()
+  @type params() :: Finch.Request.body() | map()
+  @type response() ::
+          {:ok, Finch.Response.t()}
+          | {:error, Mint.Types.error() | Finch.Error.t() | Plausible.HTTPClient.Non200Error.t()}
+
+  @callback get(url(), headers()) :: response()
+  @callback get(url()) :: response()
+  @callback post(url(), headers(), params()) :: response()
+end
+
 defmodule Plausible.HTTPClient do
   @moduledoc """
   HTTP Client built on top of Finch.
@@ -5,29 +30,33 @@ defmodule Plausible.HTTPClient do
   By default, request parameters are json-encoded.
 
   If a raw binary value is supplied, no encoding is performed.
-  If x-www-form-urlencoded content-type is set in headers, 
+  If x-www-form-urlencoded content-type is set in headers,
   URL encoding is invoked.
   """
-
-  @type url() :: Finch.Request.url()
-  @type headers() :: Finch.Request.headers()
-  @type params() :: Finch.Request.body() | map()
-  @type response() :: {:ok, Finch.Response.t()} | {:error, Mint.Types.error() | Finch.Error.t()}
 
   @doc """
   Make a POST request
   """
-  @spec post(url(), headers(), params()) :: response()
-  def(post(url, headers \\ [], params \\ nil)) do
+  @behaviour Plausible.HTTPClient.Interface
+
+  @impl Plausible.HTTPClient.Interface
+  def post(url, headers \\ [], params \\ nil) do
     call(:post, url, headers, params)
   end
 
   @doc """
   Make a GET request
   """
-  @spec get(url(), headers()) :: response()
+  @impl Plausible.HTTPClient.Interface
   def get(url, headers \\ []) do
     call(:get, url, headers, nil)
+  end
+
+  # TODO: Is it possible to tell the type checker that we're returning a module that conforms to the
+  # Plausible.HTTPClient.Interface behaviour?
+  @spec impl() :: Plausible.HTTPClient
+  def impl() do
+    Application.get_env(:plausible, :http_impl, __MODULE__)
   end
 
   defp call(method, url, headers, params) do
@@ -35,7 +64,8 @@ defmodule Plausible.HTTPClient do
 
     method
     |> build_request(url, headers, params)
-    |> do_request
+    |> do_request()
+    |> tag_error()
   end
 
   defp build_request(method, url, headers, params) do
@@ -68,5 +98,18 @@ defmodule Plausible.HTTPClient do
       _ ->
         {Jason.encode!(params), [{"content-type", "application/json"} | headers]}
     end
+  end
+
+  defp tag_error({:ok, %Finch.Response{status: status}} = ok)
+       when is_integer(status) and status >= 200 and status < 300 do
+    ok
+  end
+
+  defp tag_error({:ok, %Finch.Response{status: _} = response}) do
+    {:error, Plausible.HTTPClient.Non200Error.new(response)}
+  end
+
+  defp tag_error({:error, _} = error) do
+    error
   end
 end
