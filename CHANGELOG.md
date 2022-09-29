@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- The ability to escape `|` characters with `\` in Stats API filter values
 - An upper bound of 1000 to the `limit` parameter in Stats API
 - The `exclusions` script extension now also takes a `data-include` attribute tag
 - A `file-downloads` script extension for automatically tracking file downloads as custom events
@@ -36,6 +37,8 @@ All notable changes to this project will be documented in this file.
 - Add new strategy to recommend timezone when creating a new site
 - Alert outgrown enterprise users of their usage plausible/analytics#2197
 - Manually lock and unlock enterprise users plausible/analytics#2197
+- ARM64 support for docker images plausible/analytics#2103
+- Add support for international domain names (IDNs) plausible/analytics#2034
 
 ### Fixed
 - Hash part of the URL can now be used when excluding pages with `script.exclusions.hash.js`.
@@ -50,6 +53,10 @@ All notable changes to this project will be documented in this file.
 - Timezone offset labels now update with time changes
 - Render 404 if shared link auth cannot be verified [plausible/analytics#2225](https://github.com/plausible/analytics/pull/2225)
 - Restore compatibility with older format of shared links [plausible/analytics#2225](https://github.com/plausible/analytics/pull/2225)
+- Fix 'All time' period for sites with no recorded stats [plausible/analytics#2277](https://github.com/plausible/analytics/pull/2277)
+- Ensure settings page can be rendered after a form error [plausible/analytics#2278](https://github.com/plausible/analytics/pull/2278)
+
+>>>>>>> 09af319b (Add changelog)
 
 ### Changed
 - Cache the tracking script for 24 hours
@@ -59,6 +66,7 @@ All notable changes to this project will be documented in this file.
 - `DISABLE_REGISTRATIONS` configuration parameter can now accept `invite_only` to allow invited users to register an account while keeping regular registrations disabled plausible/analytics#1841
 - New and improved Session tracking module for higher throughput and lower latency. [PR#1934](https://github.com/plausible/analytics#1934)
 - Do not display ZZ country code in countries report [PR#1934](https://github.com/plausible/analytics#2223)
+- Add fallback icon for when DDG favicon cannot be fetched [PR#2279](https://github.com/plausible/analytics#2279)
 
 ## v1.4.1
 
