@@ -2,6 +2,10 @@ defmodule Plausible.SiteAdmin do
   use Plausible.Repo
   import Ecto.Query
 
+  def ordering(_schema) do
+    [desc: :inserted_at]
+  end
+
   def search_fields(_schema) do
     [
       :domain,
@@ -15,9 +19,10 @@ defmodule Plausible.SiteAdmin do
 
   def form_fields(_) do
     [
-      domain: nil,
-      timezone: nil,
-      public: nil
+      domain: %{update: :readonly},
+      timezone: %{choices: Plausible.Timezones.options()},
+      public: nil,
+      stats_start_date: nil
     ]
   end
 
@@ -49,7 +54,11 @@ defmodule Plausible.SiteAdmin do
   end
 
   defp get_owner_email(site) do
-    Enum.find(site.memberships, fn m -> m.role == :owner end).user.email
+    owner = Enum.find(site.memberships, fn m -> m.role == :owner end)
+
+    if owner do
+      owner.user.email
+    end
   end
 
   defp get_other_members(site) do
@@ -63,10 +72,10 @@ defmodule Plausible.SiteAdmin do
 
     if to_site do
       event_q = event_transfer_query(from_site.domain, to_site.domain)
-      {:ok, _} = Ecto.Adapters.SQL.query(Plausible.ClickhouseRepo, event_q)
+      {:ok, _} = Ecto.Adapters.SQL.query(Plausible.ClickhouseRepo, event_q, [], timeout: 30_000)
 
       session_q = session_transfer_query(from_site.domain, to_site.domain)
-      {:ok, _} = Ecto.Adapters.SQL.query(Plausible.ClickhouseRepo, session_q)
+      {:ok, _} = Ecto.Adapters.SQL.query(Plausible.ClickhouseRepo, session_q, [], timeout: 30_000)
 
       start_date = Plausible.Stats.Clickhouse.pageview_start_date_local(from_site)
 
@@ -122,4 +131,7 @@ defmodule Plausible.SiteAdmin do
     end)
     |> stringify_fields()
   end
+
+  def create_changeset(schema, attrs), do: Plausible.Site.crm_changeset(schema, attrs)
+  def update_changeset(schema, attrs), do: Plausible.Site.crm_changeset(schema, attrs)
 end
