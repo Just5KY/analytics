@@ -77,7 +77,7 @@ defmodule PlausibleWeb.SiteController do
       {:ok, %{site: site}} ->
         if is_first_site do
           PlausibleWeb.Email.welcome_email(user)
-          |> Plausible.Mailer.send_email()
+          |> Plausible.Mailer.send()
         end
 
         conn
@@ -151,12 +151,18 @@ defmodule PlausibleWeb.SiteController do
     end
   end
 
-  def delete_goal(conn, %{"website" => website, "id" => goal_id}) do
-    Plausible.Goals.delete(goal_id)
+  def delete_goal(conn, %{"id" => goal_id}) do
+    case Plausible.Goals.delete(goal_id, conn.assigns[:site].domain) do
+      :ok ->
+        conn
+        |> put_flash(:success, "Goal deleted successfully")
+        |> redirect(to: Routes.site_path(conn, :settings_goals, conn.assigns[:site].domain))
 
-    conn
-    |> put_flash(:success, "Goal deleted successfully")
-    |> redirect(to: Routes.site_path(conn, :settings_goals, website))
+      {:error, :not_found} ->
+        conn
+        |> put_flash(:error, "Could not find goal")
+        |> redirect(to: Routes.site_path(conn, :settings_goals, conn.assigns[:site].domain))
+    end
   end
 
   def settings(conn, %{"website" => website}) do
@@ -213,7 +219,7 @@ defmodule PlausibleWeb.SiteController do
 
   def settings_goals(conn, _params) do
     site = conn.assigns[:site] |> Repo.preload(:custom_domain)
-    goals = Goals.for_site(site.domain)
+    goals = Goals.for_domain(site.domain)
 
     conn
     |> assign(:skip_plausible_tracking, true)
@@ -615,23 +621,44 @@ defmodule PlausibleWeb.SiteController do
 
   def delete_shared_link(conn, %{"slug" => slug}) do
     site = conn.assigns[:site]
+    site_id = site.id
 
-    Repo.get_by(Plausible.Site.SharedLink, slug: slug)
-    |> Repo.delete!()
+    case Repo.delete_all(
+           from l in Plausible.Site.SharedLink,
+             where: l.slug == ^slug,
+             where: l.site_id == ^site_id
+         ) do
+      {1, _} ->
+        conn
+        |> put_flash(:success, "Shared Link deleted")
+        |> redirect(to: "/#{URI.encode_www_form(site.domain)}/settings/visibility")
 
-    redirect(conn, to: "/#{URI.encode_www_form(site.domain)}/settings/visibility")
+      {0, _} ->
+        conn
+        |> put_flash(:error, "Could not find Shared Link")
+        |> redirect(to: "/#{URI.encode_www_form(site.domain)}/settings/visibility")
+    end
   end
 
-  def delete_custom_domain(conn, _params) do
-    site =
-      conn.assigns[:site]
-      |> Repo.preload(:custom_domain)
+  def delete_custom_domain(conn, %{"id" => domain_id}) do
+    site = conn.assigns[:site]
+    site_id = site.id
 
-    Repo.delete!(site.custom_domain)
+    case Repo.delete_all(
+           from d in Plausible.Site.CustomDomain,
+             where: d.site_id == ^site_id,
+             where: d.id == ^domain_id
+         ) do
+      {1, _} ->
+        conn
+        |> put_flash(:success, "Custom domain deleted successfully")
+        |> redirect(to: "/#{URI.encode_www_form(site.domain)}/settings/general")
 
-    conn
-    |> put_flash(:success, "Custom domain deleted successfully")
-    |> redirect(to: "/#{URI.encode_www_form(site.domain)}/settings/general")
+      {0, _} ->
+        conn
+        |> put_flash(:error, "Failed to delete custom domain")
+        |> redirect(to: "/#{URI.encode_www_form(site.domain)}/settings/general")
+    end
   end
 
   def import_from_google_user_metric_notice(conn, %{
