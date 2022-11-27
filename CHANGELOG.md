@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- A `tagged-events` script extension for out-of-the-box custom event tracking
 - The ability to escape `|` characters with `\` in Stats API filter values
 - An upper bound of 1000 to the `limit` parameter in Stats API
 - The `exclusions` script extension now also takes a `data-include` attribute tag
@@ -40,6 +41,7 @@ All notable changes to this project will be documented in this file.
 - ARM64 support for docker images plausible/analytics#2103
 - Add support for international domain names (IDNs) plausible/analytics#2034
 - Allow self-hosters to register an account on first launch
+- Fix ownership transfer invitation link in self-hosted deployments
 
 ### Fixed
 - Plausible script does not prevent default if it's been prevented by an external script [plausible/analytics#1941](https://github.com/plausible/analytics/issues/1941)
