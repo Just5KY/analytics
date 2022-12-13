@@ -1,10 +1,17 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-
 ## Unreleased
 
+## v1.5.1 - 2022-12-06
+
+### Fixed
+- Fallback to empty build metadata when failing to parse $BUILD_METADATA plausible/analytics#2503 
+
+## v1.5.0 - 2022-12-02
+
 ### Added
+- Set a different interval on the top graph plausible/analytics#1574 (thanks to @Vigasaurus for this feature)
 - A `tagged-events` script extension for out-of-the-box custom event tracking
 - The ability to escape `|` characters with `\` in Stats API filter values
 - An upper bound of 1000 to the `limit` parameter in Stats API
@@ -59,6 +66,7 @@ All notable changes to this project will be documented in this file.
 - Restore compatibility with older format of shared links [plausible/analytics#2225](https://github.com/plausible/analytics/pull/2225)
 - Fix 'All time' period for sites with no recorded stats [plausible/analytics#2277](https://github.com/plausible/analytics/pull/2277)
 - Ensure settings page can be rendered after a form error [plausible/analytics#2278](https://github.com/plausible/analytics/pull/2278)
+- Ensure newlines from settings files are trimmed [plausible/analytics#2480](https://github.com/plausible/analytics/pull/2480)
 
 ### Changed
 - `script.file-downloads.outbound-links.js` only sends an outbound link event when an outbound download link is clicked
@@ -71,6 +79,9 @@ All notable changes to this project will be documented in this file.
 - New and improved Session tracking module for higher throughput and lower latency. [PR#1934](https://github.com/plausible/analytics#1934)
 - Do not display ZZ country code in countries report [PR#1934](https://github.com/plausible/analytics#2223)
 - Add fallback icon for when DDG favicon cannot be fetched [PR#2279](https://github.com/plausible/analytics#2279)
+
+### Security
+- Add Content-Security-Policy header to favicon path
 
 ## v1.4.1 - 2021-11-29
 

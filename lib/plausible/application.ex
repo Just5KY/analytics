@@ -22,7 +22,8 @@ defmodule Plausible.Application do
         id: :cachex_sessions
       ),
       {Plausible.Site.Cache, []},
-      {Plausible.Site.Cache.Warmer, []},
+      {Plausible.Site.Cache.Warmer.All, []},
+      {Plausible.Site.Cache.Warmer.RecentlyUpdated, []},
       PlausibleWeb.Endpoint,
       {Oban, Application.get_env(:plausible, Oban)},
       Plausible.PromEx
