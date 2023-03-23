@@ -24,13 +24,6 @@ defmodule Plausible.Sites do
       end
     end)
     |> Ecto.Multi.insert(:site, site_changeset)
-    |> Ecto.Multi.run(:existing_events, fn _, _ ->
-      site_changeset
-      |> Ecto.Changeset.validate_change(:domain, fn :domain, domain ->
-        check_for_existing_events(domain, params)
-      end)
-      |> Ecto.Changeset.apply_action(:insert)
-    end)
     |> Ecto.Multi.run(:site_membership, fn repo, %{site: site} ->
       membership_changeset =
         Site.Membership.changeset(%Site.Membership{}, %{
@@ -182,20 +175,5 @@ defmodule Plausible.Sites do
         where: sm.site_id == ^site.id,
         where: sm.role == :owner
     )
-  end
-
-  defp check_for_existing_events(domain, params) do
-    if has_events?(domain) do
-      Sentry.capture_message("Refused to create a site with existing events",
-        extra: %{params: params}
-      )
-
-      [
-        domain:
-          "This domain has already been taken. Perhaps one of your team members registered it? If that's not the case, please contact support@plausible.io"
-      ]
-    else
-      []
-    end
   end
 end

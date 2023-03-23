@@ -23,7 +23,7 @@ defmodule Plausible.Site.CacheTest do
           assert Cache.get("key", force?: true, cache_name: NonExistingCache) == nil
         end)
 
-      assert log =~ "Error retrieving 'key' from 'NonExistingCache': :no_cache"
+      assert log =~ "Error retrieving domain from 'NonExistingCache': :no_cache"
     end
 
     test "cache caches", %{test: test} do
@@ -120,6 +120,20 @@ defmodule Plausible.Site.CacheTest do
 
       Cache.refresh_all(force?: true, cache_name: test)
       assert_receive {:telemetry_handled, %{}}
+    end
+
+    test "get_site_id/2", %{test: test} do
+      {:ok, _} = start_test_cache(test)
+
+      site = insert(:site)
+
+      domain1 = site.domain
+      domain2 = "nonexisting.example.com"
+
+      :ok = Cache.refresh_all(cache_name: test)
+
+      assert site.id == Cache.get_site_id(domain1, force?: true, cache_name: test)
+      assert is_nil(Cache.get_site_id(domain2, force?: true, cache_name: test))
     end
   end
 

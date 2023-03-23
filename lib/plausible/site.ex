@@ -16,6 +16,7 @@ defmodule Plausible.Site do
     field :public, :boolean
     field :locked, :boolean
     field :stats_start_date, :date
+    field :native_stats_start_at, :naive_datetime
 
     field :ingest_rate_limit_scale_seconds, :integer, default: 60
     field :ingest_rate_limit_threshold, :integer
@@ -42,15 +43,15 @@ defmodule Plausible.Site do
   def changeset(site, attrs \\ %{}) do
     site
     |> cast(attrs, [:domain, :timezone])
-    |> validate_required([:domain, :timezone])
     |> clean_domain()
+    |> validate_required([:domain, :timezone])
     |> validate_format(:domain, ~r/^[-\.\\\/:\p{L}\d]*$/u,
       message: "only letters, numbers, slashes and period allowed"
     )
     |> validate_domain_reserved_characters()
     |> unique_constraint(:domain,
       message:
-        "This domain has already been taken. Perhaps one of your team members registered it? If that's not the case, please contact support@plausible.io"
+        "This domain cannot be registered. Perhaps one of your colleagues registered it? If that's not the case, please contact support@plausible.io"
     )
   end
 
@@ -84,6 +85,10 @@ defmodule Plausible.Site do
 
   def set_stats_start_date(site, val) do
     change(site, stats_start_date: val)
+  end
+
+  def set_native_stats_start_at(site, val) do
+    change(site, native_stats_start_at: val)
   end
 
   def start_import(site, start_date, end_date, imported_source, status \\ "importing") do

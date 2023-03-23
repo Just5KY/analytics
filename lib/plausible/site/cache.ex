@@ -169,14 +169,23 @@ defmodule Plausible.Site.Cache do
           site
 
         {:error, e} ->
-          Logger.error(
-            "Error retrieving '#{domain}' from '#{inspect(cache_name)}': #{inspect(e)}"
-          )
+          Logger.error("Error retrieving domain from '#{inspect(cache_name)}': #{inspect(e)}")
 
           nil
       end
     else
       Plausible.Sites.get_by_domain(domain)
+    end
+  end
+
+  @spec get_site_id(String.t(), Keyword.t()) :: pos_integer() | nil
+  def get_site_id(domain, opts \\ []) do
+    case get(domain, opts) do
+      %{id: site_id} ->
+        site_id
+
+      nil ->
+        nil
     end
   end
 

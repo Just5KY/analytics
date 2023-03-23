@@ -5,21 +5,32 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - 'Last updated X seconds ago' info to 'current visitors' tooltips
+- Add support for more Bamboo adapters, i.e. `Bamboo.MailgunAdapter`, `Bamboo.MandrillAdapter`, `Bamboo.SendGridAdapter` plausible/analytics#2649
 
 ### Fixed
+- Make goal-filtered CSV export return only unique_conversions timeseries in the 'visitors.csv' file
+- Stop treating page filter as an entry page filter
+- City report showing N/A instead of city names with imported data plausible/analytics#2675
+- Empty values for Screen Size, OS and Browser are uniformly replaced with "(not set)"
 - Fix [more pageviews with session prop filter than with no filters](https://github.com/plausible/analytics/issues/1666)
 - Cascade delete sent_renewal_notifications table when user is deleted plausible/analytics#2549
 - Show appropriate top-stat metric labels on the realtime dashboard when filtering by a goal
 - Fix breakdown API pagination when using event metrics plausible/analytics#2562
 - Automatically update all visible dashboard reports in the realtime view
 - Connect via TLS when using HTTPS scheme in ClickHouse URL plausible/analytics#2570
+- Add error message in case a transfer to an invited (but not joined) user is requested plausible/analytics#2651
+- Fix bug with [showing property breakdown with a prop filter](https://github.com/plausible/analytics/issues/1789)
+- Fix bug when combining goal and prop filters plausible/analytics#2654
 
 ### Changed
 - Reject events with long URIs and data URIs plausible/analytics#2536
 - Always show direct traffic in sources reports plausible/analytics#2531
 - Stop recording XX and T1 country codes plausible/analytics#2556
+- Device type is now determined from the User-Agent instead of window.innerWidth plausible/analytics#2711
+- Add padding by default to embedded dashboards so that shadows are not cut off plausible/analytics#2744
 
 ### Removed
+- Remove Firewall plug and `IP_BLOCKLIST` environment variable
 - Remove the ability to collapse the main graph plausible/analytics#2627
 
 ## v1.5.1 - 2022-12-06

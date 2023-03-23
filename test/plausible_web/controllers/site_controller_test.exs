@@ -108,27 +108,16 @@ defmodule PlausibleWeb.SiteControllerTest do
       assert Repo.get_by(Plausible.Site, domain: "example.com")
     end
 
-    test "refuses to create the site when events exist (pending deletion)", %{conn: conn} do
-      domain = "events-exist.example.com"
-
-      populate_stats(%{domain: domain}, [
-        build(:pageview)
-      ])
-
-      :inserted = eventually(fn -> {Plausible.Sites.has_events?(domain), :inserted} end)
-
+    test "fails to create the site if only http:// provided", %{conn: conn} do
       conn =
         post(conn, "/sites", %{
           "site" => %{
-            "domain" => domain,
+            "domain" => "http://",
             "timezone" => "Europe/London"
           }
         })
 
-      assert html = html_response(conn, 200)
-      assert html =~ "This domain has already been taken."
-      assert html =~ "please contact support"
-      refute Repo.get_by(Plausible.Site, domain: domain)
+      assert html_response(conn, 200) =~ "can&#39;t be blank"
     end
 
     test "starts trial if user does not have trial yet", %{conn: conn, user: user} do
@@ -291,7 +280,7 @@ defmodule PlausibleWeb.SiteControllerTest do
         })
 
       assert html_response(conn, 200) =~
-               "This domain has already been taken. Perhaps one of your team members registered it? If that&#39;s not the case, please contact support@plausible.io"
+               "This domain cannot be registered. Perhaps one of your colleagues registered it?"
     end
   end
 

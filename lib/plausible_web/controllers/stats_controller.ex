@@ -95,13 +95,31 @@ defmodule PlausibleWeb.StatsController do
     site = conn.assigns[:site]
     query = Query.from(site, params) |> Filters.add_prefix()
 
-    metrics = [:visitors, :pageviews, :bounce_rate, :visit_duration]
+    metrics =
+      cond do
+        query.filters["event:goal"] ->
+          [:visitors]
+
+        FunWithFlags.enabled?(:visits_metric, for: conn.assigns[:current_user]) ->
+          [:visitors, :pageviews, :visits, :views_per_visit, :bounce_rate, :visit_duration]
+
+        true ->
+          [:visitors, :pageviews, :bounce_rate, :visit_duration]
+      end
+
     graph = Plausible.Stats.timeseries(site, query, metrics)
-    headers = [:date | metrics]
+    columns = [:date | metrics]
+
+    column_headers =
+      if query.filters["event:goal"] do
+        [:date, :unique_conversions]
+      else
+        columns
+      end
 
     visitors =
-      Enum.map(graph, fn row -> Enum.map(headers, &row[&1]) end)
-      |> (fn data -> [headers | data] end).()
+      Enum.map(graph, fn row -> Enum.map(columns, &row[&1]) end)
+      |> (fn data -> [column_headers | data] end).()
       |> CSV.encode()
       |> Enum.join()
 
@@ -311,7 +329,10 @@ defmodule PlausibleWeb.StatsController do
 
   defp get_flags(user) do
     %{
-      custom_dimension_filter: FunWithFlags.enabled?(:custom_dimension_filter, for: user)
+      custom_dimension_filter: FunWithFlags.enabled?(:custom_dimension_filter, for: user),
+      visits_metric: FunWithFlags.enabled?(:visits_metric, for: user),
+      views_per_visit_metric: FunWithFlags.enabled?(:views_per_visit_metric, for: user),
+      comparisons: FunWithFlags.enabled?(:comparisons, for: user)
     }
   end
 

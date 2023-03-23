@@ -16,7 +16,6 @@ defmodule Plausible.Ingestion.Request do
     field :hostname, :string
     field :referrer, :string
     field :domains, {:array, :string}
-    field :screen_width, :string
     field :hash_mode, :string
     field :pathname, :string
     field :props, :map
@@ -27,17 +26,17 @@ defmodule Plausible.Ingestion.Request do
 
   @type t() :: %__MODULE__{}
 
-  @spec build(Plug.Conn.t()) :: {:ok, t()} | {:error, Changeset.t()}
+  @spec build(Plug.Conn.t(), NaiveDateTime.t()) :: {:ok, t()} | {:error, Changeset.t()}
   @doc """
   Builds and initially validates %Plausible.Ingestion.Request{} struct from %Plug.Conn{}.
   """
-  def build(%Plug.Conn{} = conn) do
+  def build(%Plug.Conn{} = conn, now \\ NaiveDateTime.utc_now()) do
     changeset =
       %__MODULE__{}
       |> Changeset.change()
       |> Changeset.put_change(
         :timestamp,
-        NaiveDateTime.utc_now()
+        NaiveDateTime.truncate(now, :second)
       )
 
     case parse_body(conn) do
@@ -89,7 +88,6 @@ defmodule Plausible.Ingestion.Request do
       changeset,
       event_name: request_body["n"] || request_body["name"],
       referrer: request_body["r"] || request_body["referrer"],
-      screen_width: request_body["w"] || request_body["screen_width"],
       hash_mode: request_body["h"] || request_body["hashMode"],
       props: parse_props(request_body)
     )

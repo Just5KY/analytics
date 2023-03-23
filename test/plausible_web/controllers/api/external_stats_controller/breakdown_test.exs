@@ -18,6 +18,32 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
              }
     end
 
+    test "validates that property is valid", %{conn: conn, site: site} do
+      conn =
+        get(conn, "/api/v1/stats/breakdown", %{
+          "site_id" => site.domain,
+          "property" => "badproperty"
+        })
+
+      assert json_response(conn, 400) == %{
+               "error" =>
+                 "Invalid property 'badproperty'. Please provide a valid property for the breakdown endpoint: https://plausible.io/docs/stats-api#properties"
+             }
+    end
+
+    test "empty custom prop is invalid", %{conn: conn, site: site} do
+      conn =
+        get(conn, "/api/v1/stats/breakdown", %{
+          "site_id" => site.domain,
+          "property" => "event:props:"
+        })
+
+      assert json_response(conn, 400) == %{
+               "error" =>
+                 "Invalid property 'event:props:'. Please provide a valid property for the breakdown endpoint: https://plausible.io/docs/stats-api#properties"
+             }
+    end
+
     test "validates that correct period is used", %{conn: conn, site: site} do
       conn =
         get(conn, "/api/v1/stats/breakdown", %{
@@ -41,7 +67,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
       assert json_response(conn, 400) == %{
                "error" =>
-                 "The metric `baa` is not recognized. Find valid metrics from the documentation: https://plausible.io/docs/stats-api#get-apiv1statsbreakdown"
+                 "The metric `baa` is not recognized. Find valid metrics from the documentation: https://plausible.io/docs/stats-api#metrics"
              }
     end
 
@@ -1231,22 +1257,29 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
              }
     end
 
-    test "event:page filter shows traffic sources directly to that page", %{
+    test "event:page filter shows sources of sessions that have visited that page", %{
       conn: conn,
       site: site
     } do
       populate_stats(site, [
         build(:pageview,
-          pathname: "/ignore",
-          referrer_source: "Should not show up",
-          utm_medium: "Should not show up",
-          utm_source: "Should not show up",
-          utm_campaign: "Should not show up",
+          pathname: "/",
+          referrer_source: "Twitter",
+          utm_medium: "Twitter",
+          utm_source: "Twitter",
+          utm_campaign: "Twitter",
           user_id: @user_id
         ),
         build(:pageview,
           pathname: "/plausible.io",
           user_id: @user_id
+        ),
+        build(:pageview,
+          pathname: "/plausible.io",
+          referrer_source: "Google",
+          utm_medium: "Google",
+          utm_source: "Google",
+          utm_campaign: "Google"
         ),
         build(:pageview,
           pathname: "/plausible.io",
@@ -1268,7 +1301,8 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
         assert json_response(conn, 200) == %{
                  "results" => [
-                   %{property => "Google", "visitors" => 1}
+                   %{property => "Google", "visitors" => 2},
+                   %{property => "Twitter", "visitors" => 1}
                  ]
                }
       end

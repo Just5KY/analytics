@@ -5,13 +5,26 @@ import { navigateToQuery } from '../../query'
 import * as api from '../../api'
 import * as storage from '../../util/storage'
 import LazyLoader from '../../components/lazy-loader'
-import {GraphTooltip, buildDataSet, METRIC_MAPPING, METRIC_LABELS, METRIC_FORMATTER, LoadingState} from './graph-util';
+import GraphTooltip from './graph-tooltip'
+import { buildDataSet, METRIC_MAPPING, METRIC_LABELS, METRIC_FORMATTER, LoadingState } from './graph-util'
 import dateFormatter from './date-formatter';
 import TopStats from './top-stats';
 import { IntervalPicker, getStoredInterval, storeInterval } from './interval-picker';
 import FadeIn from '../../fade-in';
 import * as url from '../../util/url'
-import classNames from "classnames";
+import classNames from 'classnames';
+
+const calculateMaximumY = function(dataset) {
+  const yAxisValues = dataset
+    .flatMap((item) => item.data)
+    .map((item) => item || 0)
+
+  if (yAxisValues) {
+    return Math.max(...yAxisValues)
+  } else {
+    return 1
+  }
+}
 
 class LineGraph extends React.Component {
   constructor(props) {
@@ -28,7 +41,7 @@ class LineGraph extends React.Component {
     const { graphData, metric, query } = this.props
     const graphEl = document.getElementById("main-graph-canvas")
     this.ctx = graphEl.getContext('2d');
-    const dataSet = buildDataSet(graphData.plot, graphData.present_index, this.ctx, METRIC_LABELS[metric])
+    const dataSet = buildDataSet(graphData.plot, graphData.comparison_plot, graphData.present_index, this.ctx, METRIC_LABELS[metric])
 
     return new Chart(this.ctx, {
       type: 'line',
@@ -49,12 +62,14 @@ class LineGraph extends React.Component {
           },
         },
         responsive: true,
+        maintainAspectRatio: false,
         onResize: this.updateWindowDimensions,
         elements: { line: { tension: 0 }, point: { radius: 0 } },
         onClick: this.onClick.bind(this),
         scales: {
           y: {
-            beginAtZero: true,
+            min: 0,
+            suggestedMax: calculateMaximumY(dataSet),
             ticks: {
               callback: METRIC_FORMATTER[metric],
               maxTicksLimit: 8,
@@ -65,14 +80,40 @@ class LineGraph extends React.Component {
               drawBorder: false,
             }
           },
+          yComparison: {
+            min: 0,
+            suggestedMax: calculateMaximumY(dataSet),
+            display: false,
+            grid: { display: false },
+          },
           x: {
             grid: { display: false },
             ticks: {
               maxTicksLimit: 8,
               callback: function (val, _index, _ticks) {
+                if (this.getLabelForValue(val) == "__blank__") return ""
+
+                const hasMultipleYears =
+                  graphData.labels
+                  .filter((date) => typeof date === 'string')
+                  .map(date => date.split('-')[0])
+                  .filter((value, index, list) => list.indexOf(value) === index)
+                  .length > 1
+
                 if (graphData.interval === 'hour' && query.period !== 'day') {
-                  const date = dateFormatter("date", false, query.period)(this.getLabelForValue(val))
-                  const hour = dateFormatter(graphData.interval, false, query.period)(this.getLabelForValue(val))
+                  const date = dateFormatter({
+                    interval: "date",
+                    longForm: false,
+                    period: query.period,
+                    shouldShowYear: hasMultipleYears,
+                  })(this.getLabelForValue(val))
+
+                  const hour = dateFormatter({
+                    interval: graphData.interval,
+                    longForm: false,
+                    period: query.period,
+                    shouldShowYear: hasMultipleYears,
+                  })(this.getLabelForValue(val))
 
                   // Returns a combination of date and hour. This is because
                   // small intervals like hour may return multiple days
@@ -81,10 +122,14 @@ class LineGraph extends React.Component {
                 }
 
                 if (graphData.interval === 'minute' && query.period !== 'realtime') {
-                  return dateFormatter("hour", false, query.period)(this.getLabelForValue(val))
+                  return dateFormatter({
+                    interval: "hour", longForm: false, period: query.period,
+                  })(this.getLabelForValue(val))
                 }
 
-                return dateFormatter(graphData.interval, false, query.period)(this.getLabelForValue(val))
+                return dateFormatter({
+                  interval: graphData.interval, longForm: false, period: query.period, shouldShowYear: hasMultipleYears,
+                })(this.getLabelForValue(val))
               },
               color: this.props.darkTheme ? 'rgb(243, 244, 246)' : undefined
             }
@@ -175,26 +220,12 @@ class LineGraph extends React.Component {
 
   onClick(e) {
     const element = this.chart.getElementsAtEventForMode(e, 'index', { intersect: false })[0]
-    const date = this.chart.data.labels[element.index]
+    const date = this.props.graphData.labels[element.index] || this.props.graphData.comparison_labels[element.index]
 
     if (this.props.graphData.interval === 'month') {
-      navigateToQuery(
-        this.props.history,
-        this.props.query,
-        {
-          period: 'month',
-          date,
-        }
-      )
+      navigateToQuery(this.props.history, this.props.query, { period: 'month', date })
     } else if (this.props.graphData.interval === 'date') {
-      navigateToQuery(
-        this.props.history,
-        this.props.query,
-        {
-          period: 'day',
-          date,
-        }
-      )
+      navigateToQuery(this.props.history, this.props.query, { period: 'day', date })
     }
   }
 
@@ -273,24 +304,39 @@ class LineGraph extends React.Component {
     }
   }
 
+  // This function is used for maintaining the main-graph/top-stats container height in the
+  // loading process. The container height depends on how many top stat metrics are returned
+  // from the API, but in the loading state, we don't know that yet. We can use localStorage
+  // to keep track of the Top Stats container height.
+  getTopStatsHeight() {
+    if (this.props.topStatData) {
+      return 'auto'
+    } else {
+      return `${storage.getItem(`topStatsHeight__${this.props.site.domain}`) || 89}px`
+    }
+  }
+
   render() {
-    const { updateMetric, metric, topStatData, query, site, graphData } = this.props
-    const extraClass = this.props.graphData && this.props.graphData.interval === 'hour' ? '' : 'cursor-pointer'
+    const { mainGraphRefreshing, updateMetric, updateInterval, metric, topStatData, query, site, graphData, lastLoadTimestamp } = this.props
+    const canvasClass = classNames('mt-4 select-none', {'cursor-pointer': !['minute', 'hour'].includes(graphData?.interval)})
 
     return (
-      <div className="graph-inner">
-        <div className="flex flex-wrap" ref={this.boundary}>
-          <TopStats query={query} metric={metric} updateMetric={updateMetric} topStatData={topStatData} tooltipBoundary={this.boundary.current} lastLoadTimestamp={this.props.lastLoadTimestamp} />
+      <div>
+        <div id="top-stats-container" className="flex flex-wrap" ref={this.boundary} style={{height: this.getTopStatsHeight()}}>
+          <TopStats query={query} metric={metric} updateMetric={updateMetric} topStatData={topStatData} tooltipBoundary={this.boundary.current} lastLoadTimestamp={lastLoadTimestamp} />
         </div>
         <div className="relative px-2">
+          {mainGraphRefreshing && renderLoader()}
           <div className="absolute right-4 -top-10 py-2 md:py-0 flex items-center">
             { this.downloadLink() }
             { this.samplingNotice() }
             { this.importedNotice() }
-            <IntervalPicker site={site} query={query} graphData={graphData} metric={metric} updateInterval={this.props.updateInterval}/>
+            <IntervalPicker site={site} query={query} graphData={graphData} metric={metric} updateInterval={updateInterval}/>
           </div>
           <FadeIn show={graphData}>
-            <canvas id="main-graph-canvas" className={'mt-4 select-none ' + extraClass} width="1054" height="342"></canvas>
+            <div className="relative h-96 w-full z-0">
+              <canvas id="main-graph-canvas" className={canvasClass}></canvas>
+            </div>
           </FadeIn>
         </div>
       </div>
@@ -336,7 +382,7 @@ export default class VisitorGraph extends React.Component {
   updateInterval(interval) {
     if (this.isIntervalValid(interval)) {
       storeInterval(this.props.query.period, this.props.site.domain, interval)
-      this.setState({ mainGraphLoadingState: LoadingState.refreshing }, this.fetchGraphData)
+      this.setState({ mainGraphLoadingState: LoadingState.refreshing, graphData: null }, this.fetchGraphData)
     }
   }
 
@@ -385,6 +431,10 @@ export default class VisitorGraph extends React.Component {
     document.removeEventListener('tick', this.fetchTopStatData)
   }
 
+  storeTopStatsContainerHeight() {
+    storage.setItem(`topStatsHeight__${this.props.site.domain}`, document.getElementById('top-stats-container').clientHeight)
+  }
+
   updateMetric(clickedMetric) {
     if (this.state.metric == clickedMetric) return
 
@@ -412,9 +462,21 @@ export default class VisitorGraph extends React.Component {
   fetchTopStatData() {
     api.get(`/api/stats/${encodeURIComponent(this.props.site.domain)}/top-stats`, this.props.query)
       .then((res) => {
-        this.setState({ topStatsLoadingState: LoadingState.loaded, topStatData: res }, this.resetMetric)
+        res.top_stats = this.maybeRemoveFeatureFlaggedMetrics(res.top_stats)
+        this.setState({ topStatsLoadingState: LoadingState.loaded, topStatData: res }, () => {
+          this.storeTopStatsContainerHeight()
+          this.resetMetric()
+        })
         return res
       })
+  }
+
+  maybeRemoveFeatureFlaggedMetrics(top_stats) {
+    if (this.props.site.flags.visits_metric) {
+      return top_stats
+    } else {
+      return top_stats.filter((stat) => {return !(["Total visits", "Views per visit"].includes(stat.name))})
+    }
   }
 
   renderInner() {
@@ -426,36 +488,42 @@ export default class VisitorGraph extends React.Component {
     const mainGraphRefreshing = (mainGraphLoadingState === LoadingState.refreshing)
     const topStatAndGraphLoaded = !!(topStatData && graphData)
 
-    const showGraph =
-      LoadingState.isLoadedOrRefreshing(topStatsLoadingState) &&
+    const shouldShow =
+      topStatsLoadingState === LoadingState.loaded &&
       LoadingState.isLoadedOrRefreshing(mainGraphLoadingState) &&
       (topStatData && mainGraphRefreshing || topStatAndGraphLoaded)
 
     return (
-      <FadeIn show={showGraph}>
-        <LineGraphWithRouter graphData={graphData} topStatData={topStatData} site={site} query={query} darkTheme={theme} metric={metric} updateMetric={this.updateMetric} updateInterval={this.updateInterval} lastLoadTimestamp={this.props.lastLoadTimestamp} />
+      <FadeIn show={shouldShow}>
+        <LineGraphWithRouter mainGraphRefreshing={mainGraphRefreshing} graphData={graphData} topStatData={topStatData} site={site} query={query} darkTheme={theme} metric={metric} updateMetric={this.updateMetric} updateInterval={this.updateInterval} lastLoadTimestamp={this.props.lastLoadTimestamp} />
       </FadeIn>
     )
   }
 
   render() {
     const {mainGraphLoadingState, topStatsLoadingState} = this.state
-    const loaderClassName = classNames('mx-auto loading', {
-      'pt-52 sm:pt-56 md:pt-60': mainGraphLoadingState == LoadingState.refreshing,
-      'pt-32 sm:pt-36 md:pt-48': mainGraphLoadingState !== LoadingState.refreshing,
-    })
 
     const showLoader =
-      LoadingState.isLoadingOrRefreshing(mainGraphLoadingState) ||
-      LoadingState.isLoadingOrRefreshing(topStatsLoadingState)
+      [mainGraphLoadingState, topStatsLoadingState].includes(LoadingState.loading) &&
+      mainGraphLoadingState !== LoadingState.refreshing
 
     return (
       <LazyLoader onVisible={this.onVisible}>
-        <div className={"relative w-full mt-2 bg-white rounded shadow-xl dark:bg-gray-825 main-graph"}>
-          {showLoader && <div className="graph-inner"><div className={loaderClassName}><div></div></div></div>}
+        <div className={"relative w-full mt-2 bg-white rounded shadow-xl dark:bg-gray-825"}>
+          {showLoader && renderLoader()}
           {this.renderInner()}
         </div>
       </LazyLoader>
     )
   }
+}
+
+function renderLoader() {
+  return (
+    <div className="absolute h-full w-full flex items-center justify-center">
+      <div className="loading">
+        <div></div>
+      </div>
+    </div>
+  )
 }
