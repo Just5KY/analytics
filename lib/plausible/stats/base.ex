@@ -35,11 +35,19 @@ defmodule Plausible.Stats.Base do
     {first_datetime, last_datetime} = utc_boundaries(query, site)
 
     q =
-      from(
-        e in "events",
-        where: e.domain == ^site.domain,
-        where: e.timestamp >= ^first_datetime and e.timestamp < ^last_datetime
-      )
+      if Plausible.v2?() do
+        from(
+          e in "events_v2",
+          where: e.site_id == ^site.id,
+          where: e.timestamp >= ^first_datetime and e.timestamp < ^last_datetime
+        )
+      else
+        from(
+          e in "events",
+          where: e.domain == ^site.domain,
+          where: e.timestamp >= ^first_datetime and e.timestamp < ^last_datetime
+        )
+      end
       |> add_sample_hint(query)
 
     q =
@@ -190,11 +198,19 @@ defmodule Plausible.Stats.Base do
     {first_datetime, last_datetime} = utc_boundaries(query, site)
 
     sessions_q =
-      from(
-        s in "sessions",
-        where: s.domain == ^site.domain,
-        where: s.start >= ^first_datetime and s.start < ^last_datetime
-      )
+      if Plausible.v2?() do
+        from(
+          s in "sessions_v2",
+          where: s.site_id == ^site.id,
+          where: s.start >= ^first_datetime and s.start < ^last_datetime
+        )
+      else
+        from(
+          s in "sessions",
+          where: s.domain == ^site.domain,
+          where: s.start >= ^first_datetime and s.start < ^last_datetime
+        )
+      end
       |> add_sample_hint(query)
       |> filter_by_entry_props(query)
 
@@ -497,10 +513,16 @@ defmodule Plausible.Stats.Base do
     {first_datetime, last_datetime}
   end
 
+  @replaces %{
+    ~r/\*\*/ => ".*",
+    ~r/(?<!\.)\*/ => "[^/]*",
+    "(" => "\\(",
+    ")" => "\\)"
+  }
   def page_regex(expr) do
-    "^#{expr}$"
-    |> String.replace(~r/\*\*/, ".*")
-    |> String.replace(~r/(?<!\.)\*/, "[^/]*")
+    Enum.reduce(@replaces, "^#{expr}$", fn {pattern, replacement}, regex ->
+      String.replace(regex, pattern, replacement)
+    end)
   end
 
   defp add_sample_hint(db_q, query) do
