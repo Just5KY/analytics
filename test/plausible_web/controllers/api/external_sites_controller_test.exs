@@ -103,7 +103,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       assert json_response(conn, 200) == %{"deleted" => true}
     end
 
-    @tag :v2_only
     test "delete a site by its old domain after domain change", %{conn: conn, site: site} do
       old_domain = site.domain
       new_domain = "new.example.com"
@@ -159,7 +158,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       assert String.starts_with?(res["url"], "http://")
     end
 
-    @tag :v2_only
     test "can add a shared link to a site using the old site id after domain change", %{
       conn: conn,
       site: site
@@ -256,6 +254,7 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       res = json_response(conn, 200)
       assert res["goal_type"] == "event"
       assert res["event_name"] == "Signup"
+      assert res["domain"] == site.domain
     end
 
     test "can add a goal as page to a site", %{conn: conn, site: site} do
@@ -269,9 +268,9 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       res = json_response(conn, 200)
       assert res["goal_type"] == "page"
       assert res["page_path"] == "/signup"
+      assert res["domain"] == site.domain
     end
 
-    @tag :v2_only
     test "can add a goal using old site_id after domain change", %{conn: conn, site: site} do
       old_domain = site.domain
       new_domain = "new.example.com"
@@ -288,6 +287,7 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       res = json_response(conn, 200)
       assert res["goal_type"] == "event"
       assert res["event_name"] == "Signup"
+      assert res["domain"] == new_domain
     end
 
     test "is idempotent find or create op", %{conn: conn, site: site} do
@@ -411,7 +411,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       assert json_response(conn, 200) == %{"deleted" => true}
     end
 
-    @tag :v2_only
     test "delete a goal using old site_id after domain change", %{conn: conn, site: site} do
       old_domain = site.domain
       new_domain = "new.example.com"
@@ -487,7 +486,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       assert json_response(conn, 200) == %{"domain" => site.domain, "timezone" => site.timezone}
     end
 
-    @tag :v2_only
     test "get a site by old site_id after domain change", %{conn: conn, site: site} do
       old_domain = site.domain
       new_domain = "new.example.com"
@@ -509,7 +507,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
   describe "PUT /api/v1/sites/:site_id" do
     setup :create_new_site
 
-    @tag :v2_only
     test "can change domain name", %{conn: conn, site: site} do
       old_domain = site.domain
       assert old_domain != "new.example.com"
@@ -530,7 +527,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
       assert site.domain_changed_from == old_domain
     end
 
-    @tag :v2_only
     test "can't make a no-op change", %{conn: conn, site: site} do
       conn =
         put(conn, "/api/v1/sites/#{site.domain}", %{
@@ -542,7 +538,6 @@ defmodule PlausibleWeb.Api.ExternalSitesControllerTest do
              }
     end
 
-    @tag :v2_only
     test "domain parameter is required", %{conn: conn, site: site} do
       conn = put(conn, "/api/v1/sites/#{site.domain}", %{})
 

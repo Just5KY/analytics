@@ -99,8 +99,6 @@ ch_db_url =
   |> get_var_from_path_or_env("CLICKHOUSE_MAX_BUFFER_SIZE", "10000")
   |> Integer.parse()
 
-v2_migration_done = get_var_from_path_or_env(config_dir, "V2_MIGRATION_DONE")
-
 ### Mandatory params End
 
 build_metadata_raw = get_var_from_path_or_env(config_dir, "BUILD_METADATA", "{}")
@@ -132,8 +130,6 @@ runtime_metadata = [
 ]
 
 config :plausible, :runtime_metadata, runtime_metadata
-
-config :plausible, :v2_migration_done, v2_migration_done
 
 sentry_dsn = get_var_from_path_or_env(config_dir, "SENTRY_DSN")
 honeycomb_api_key = get_var_from_path_or_env(config_dir, "HONEYCOMB_API_KEY")
@@ -580,3 +576,17 @@ config :plausible, Plausible.PromEx,
   drop_metrics_groups: [],
   grafana: :disabled,
   metrics_server: :disabled
+
+if not is_selfhost do
+  site_default_ingest_threshold =
+    case System.get_env("SITE_DEFAULT_INGEST_THRESHOLD") do
+      threshold when byte_size(threshold) > 0 ->
+        {value, ""} = Integer.parse(threshold)
+        value
+
+      _ ->
+        nil
+    end
+
+  config :plausible, Plausible.Site, default_ingest_threshold: site_default_ingest_threshold
+end

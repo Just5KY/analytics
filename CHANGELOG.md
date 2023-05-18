@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- Add support for `with_imported=true` in Stats API aggregate endpoint
+- Ability to use '--' instead of '=' sign in the `tagged-events` classnames
 - 'Last updated X seconds ago' info to 'current visitors' tooltips
 - Add support for more Bamboo adapters, i.e. `Bamboo.MailgunAdapter`, `Bamboo.MandrillAdapter`, `Bamboo.SendGridAdapter` plausible/analytics#2649
 - Ability to change domain for existing site (requires numeric IDs data migration, instructions will be provided separately) UI + API (`PUT /api/v1/sites`)
@@ -24,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Fix bug when combining goal and prop filters plausible/analytics#2654
 
 ### Changed
+- Treat page filter as entry page filter for `bounce_rate`
 - Reject events with long URIs and data URIs plausible/analytics#2536
 - Always show direct traffic in sources reports plausible/analytics#2531
 - Stop recording XX and T1 country codes plausible/analytics#2556

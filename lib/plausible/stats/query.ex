@@ -4,6 +4,7 @@ defmodule Plausible.Stats.Query do
             period: nil,
             filters: %{},
             sample_threshold: 20_000_000,
+            imported_data_requested: false,
             include_imported: false
 
   @default_sample_threshold 20_000_000
@@ -20,8 +21,7 @@ defmodule Plausible.Stats.Query do
       interval: params["interval"] || Interval.default_for_period(params["period"]),
       date_range: Date.range(date, date),
       filters: FilterParser.parse_filters(params["filters"]),
-      sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold),
-      include_imported: false
+      sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
   end
 
@@ -35,7 +35,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "7d"} = params) do
@@ -49,7 +49,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "30d"} = params) do
@@ -63,7 +63,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "month"} = params) do
@@ -79,7 +79,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "6mo"} = params) do
@@ -98,7 +98,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "12mo"} = params) do
@@ -117,7 +117,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "year"} = params) do
@@ -134,7 +134,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(site, %{"period" => "all"} = params) do
@@ -194,7 +194,7 @@ defmodule Plausible.Stats.Query do
       filters: FilterParser.parse_filters(params["filters"]),
       sample_threshold: Map.get(params, "sample_threshold", @default_sample_threshold)
     }
-    |> maybe_include_imported(site, params)
+    |> put_imported_opts(site, params)
   end
 
   def from(tz, params) do
@@ -248,19 +248,23 @@ defmodule Plausible.Stats.Query do
     end
   end
 
-  defp maybe_include_imported(query, site, params) do
-    imported_data_requested = params["with_imported"] == "true"
-    has_imported_data = site.imported_data && site.imported_data.status == "ok"
+  defp put_imported_opts(query, site, params) do
+    requested? = params["with_imported"] == "true"
 
-    date_range_overlaps =
-      has_imported_data && !Timex.after?(query.date_range.first, site.imported_data.end_date)
+    query
+    |> Map.put(:imported_data_requested, requested?)
+    |> Map.put(:include_imported, include_imported?(query, site, requested?))
+  end
 
-    no_filters_applied = Enum.empty?(query.filters)
-
-    include_imported =
-      imported_data_requested && has_imported_data && date_range_overlaps && no_filters_applied
-
-    %{query | include_imported: !!include_imported}
+  @spec include_imported?(t(), Plausible.Site.t(), boolean()) :: boolean()
+  def include_imported?(query, site, requested?) do
+    cond do
+      is_nil(site.imported_data) -> false
+      site.imported_data.status != "ok" -> false
+      Timex.after?(query.date_range.first, site.imported_data.end_date) -> false
+      Enum.any?(query.filters) -> false
+      true -> requested?
+    end
   end
 
   @spec trace(%__MODULE__{}) :: %__MODULE__{}

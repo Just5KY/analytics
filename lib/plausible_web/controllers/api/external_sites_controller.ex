@@ -53,7 +53,7 @@ defmodule PlausibleWeb.Api.ExternalSitesController do
     # for now this only allows to change the domain
     site = Sites.get_for_user(conn.assigns[:current_user].id, site_id, [:owner, :admin])
 
-    if site && Plausible.v2?() do
+    if site do
       case Plausible.Site.Domain.change(site, params["domain"]) do
         {:ok, site} ->
           json(conn, site)
@@ -134,7 +134,7 @@ defmodule PlausibleWeb.Api.ExternalSitesController do
          {:ok, goal_id} <- expect_param_key(params, "goal_id"),
          site when not is_nil(site) <-
            Sites.get_for_user(conn.assigns[:current_user].id, site_id, [:owner, :admin]) do
-      case Goals.delete(goal_id, site.domain) do
+      case Goals.delete(goal_id, site) do
         :ok ->
           json(conn, %{"deleted" => true})
 
