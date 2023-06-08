@@ -371,12 +371,15 @@ defmodule PlausibleWeb.AuthController do
       |> redirect(to: login_dest)
     else
       :wrong_password ->
+        maybe_log_failed_login_attempts("wrong password for #{email}")
+
         render(conn, "login_form.html",
           error: "Wrong email or password. Please try again.",
           layout: {PlausibleWeb.LayoutView, "focus.html"}
         )
 
       :user_not_found ->
+        maybe_log_failed_login_attempts("user not found for #{email}")
         Plausible.Auth.Password.dummy_calculation()
 
         render(conn, "login_form.html",
@@ -385,11 +388,19 @@ defmodule PlausibleWeb.AuthController do
         )
 
       {:rate_limit, _} ->
+        maybe_log_failed_login_attempts("too many logging attempts for #{email}")
+
         render_error(
           conn,
           429,
           "Too many login attempts. Wait a minute before trying again."
         )
+    end
+  end
+
+  defp maybe_log_failed_login_attempts(message) do
+    if Application.get_env(:plausible, :log_failed_login_attempts) do
+      Logger.warning("[login] #{message}")
     end
   end
 
@@ -533,21 +544,7 @@ defmodule PlausibleWeb.AuthController do
   end
 
   def delete_me(conn, params) do
-    user =
-      conn.assigns[:current_user]
-      |> Repo.preload(site_memberships: :site)
-      |> Repo.preload(:subscription)
-
-    for membership <- user.site_memberships do
-      Repo.delete!(membership)
-
-      if membership.role == :owner do
-        Plausible.Site.Removal.run(membership.site.domain)
-      end
-    end
-
-    if user.subscription, do: Repo.delete!(user.subscription)
-    Repo.delete!(user)
+    Plausible.Auth.delete_user(conn.assigns[:current_user])
 
     logout(conn, params)
   end

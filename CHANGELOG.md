@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
 - 'Last updated X seconds ago' info to 'current visitors' tooltips
 - Add support for more Bamboo adapters, i.e. `Bamboo.MailgunAdapter`, `Bamboo.MandrillAdapter`, `Bamboo.SendGridAdapter` plausible/analytics#2649
 - Ability to change domain for existing site (requires numeric IDs data migration, instructions will be provided separately) UI + API (`PUT /api/v1/sites`)
+- Add `LOG_FAILED_LOGIN_ATTEMPTS` environment variable to enable failed login attempts logs plausible/analytics#2936
+- Add `MAILER_NAME` environment variable support plausible/analytics#2937
+- Add `MAILGUN_BASE_URI` support for `Bamboo.MailgunAdapter` plausible/analytics#2935
+- Add a landing page for self-hosters plausible/analytics#2989
 
 ### Fixed
 - Fix tracker bug - call callback function even when event is ignored
@@ -39,6 +43,7 @@ All notable changes to this project will be documented in this file.
 ### Removed
 - Remove Firewall plug and `IP_BLOCKLIST` environment variable
 - Remove the ability to collapse the main graph plausible/analytics#2627
+- Remove `custom_dimension_filter` feature flag plausible/analytics#2996
 
 ## v1.5.1 - 2022-12-06
 
