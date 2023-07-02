@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 ### Added
+- Call to action for tracking Goal Conversions and an option to hide the section from the dashboard
 - Add support for `with_imported=true` in Stats API aggregate endpoint
 - Ability to use '--' instead of '=' sign in the `tagged-events` classnames
 - 'Last updated X seconds ago' info to 'current visitors' tooltips
@@ -30,6 +31,8 @@ All notable changes to this project will be documented in this file.
 - Fix bug with [showing property breakdown with a prop filter](https://github.com/plausible/analytics/issues/1789)
 - Fix bug when combining goal and prop filters plausible/analytics#2654
 - Fix broken favicons when domain includes a slash
+- Fix bug when using multiple [wildcard goal filters](https://github.com/plausible/analytics/pull/3015)
+- Fix a bug where realtime would fail with imported data
 
 ### Changed
 - Treat page filter as entry page filter for `bounce_rate`
@@ -39,6 +42,7 @@ All notable changes to this project will be documented in this file.
 - Device type is now determined from the User-Agent instead of window.innerWidth plausible/analytics#2711
 - Add padding by default to embedded dashboards so that shadows are not cut off plausible/analytics#2744
 - Update the User Agents database (https://github.com/matomo-org/device-detector/releases/tag/6.1.1)
+- Disable registration in self-hosted setups by default plausible/analytics#3014
 
 ### Removed
 - Remove Firewall plug and `IP_BLOCKLIST` environment variable
