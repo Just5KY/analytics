@@ -13,7 +13,7 @@ defmodule Plausible.Stats.CustomProps do
   """
   def props_for_all_event_names(site, query) do
     from(e in base_event_query(site, query),
-      inner_lateral_join: meta in fragment("meta"),
+      array_join: meta in fragment("meta"),
       group_by: e.name,
       select: {e.name, fragment("groupArray(?)", meta.key)},
       distinct: true
@@ -34,14 +34,14 @@ defmodule Plausible.Stats.CustomProps do
     end
   end
 
-  defp fetch_prop_names(site, query) do
+  def fetch_prop_names(site, query) do
     case Query.get_filter_by_prefix(query, "event:props:") do
       {"event:props:" <> key, _} ->
         [key]
 
       _ ->
         from(e in base_event_query(site, query),
-          inner_lateral_join: meta in fragment("meta"),
+          array_join: meta in fragment("meta"),
           select: meta.key,
           distinct: true
         )
@@ -51,7 +51,8 @@ defmodule Plausible.Stats.CustomProps do
   end
 
   def maybe_allowed_props_only(q, allowed_props) when is_list(allowed_props) do
-    from [..., m] in q, where: m.key in ^allowed_props
+    props = allowed_props ++ Plausible.Props.internal_keys()
+    from [..., m] in q, where: m.key in ^props
   end
 
   def maybe_allowed_props_only(q, nil), do: q

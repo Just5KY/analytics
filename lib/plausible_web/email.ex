@@ -79,7 +79,7 @@ defmodule PlausibleWeb.Email do
   end
 
   def trial_upgrade_email(user, day, {pageviews, custom_events}) do
-    suggested_plan = Plausible.Billing.Plans.suggested_plan(user, pageviews + custom_events)
+    suggested_plan = Plausible.Billing.Plans.suggest(user, pageviews + custom_events)
 
     base_email()
     |> to(user)
@@ -104,11 +104,13 @@ defmodule PlausibleWeb.Email do
   end
 
   def weekly_report(email, site, assigns) do
+    assigns = Keyword.put(assigns, :site, site)
+
     base_email(%{layout: nil})
     |> to(email)
     |> tag("weekly-report")
     |> subject("#{assigns[:name]} report for #{site.domain}")
-    |> render("weekly_report.html", Keyword.put(assigns, :site, site))
+    |> html_body(PlausibleWeb.MJML.WeeklyReport.render(assigns))
   end
 
   def spike_notification(email, site, current_visitors, sources, dashboard_link) do

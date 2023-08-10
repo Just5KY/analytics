@@ -16,13 +16,16 @@ let suggestionsDropdown = function(id) {
     },
     scrollTo(idx) {
       this.$refs[`dropdown-${this.id}-option-${idx}`]?.scrollIntoView(
-        { block: 'center', behavior: 'smooth', inline: 'start' }
+        { block: 'nearest', behavior: 'smooth', inline: 'start' }
       )
     },
     focusNext() {
       const nextIndex = this.focus + 1
       const total = this.$refs.suggestions?.childElementCount ?? 0
-      if (this.isOpen && nextIndex < total) {
+
+      if (!this.isOpen) this.open()
+
+      if (nextIndex < total) {
         this.setFocus(nextIndex)
         this.scrollTo(nextIndex);
       }

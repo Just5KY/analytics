@@ -35,15 +35,15 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Signup",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 3,
+                 "visitors" => 2,
+                 "events" => 3,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                },
                %{
                  "name" => "Visit /register",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                }
@@ -84,8 +84,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Payment",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 2,
+                 "visitors" => 1,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                }
@@ -125,8 +125,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Payment",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 66.7
                }
@@ -164,8 +164,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Payment",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 3,
+                 "visitors" => 2,
+                 "events" => 3,
                  "prop_names" => [],
                  "conversion_rate" => 66.7
                }
@@ -205,8 +205,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Payment",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 3,
+                 "visitors" => 2,
+                 "events" => 3,
                  "prop_names" => [],
                  "conversion_rate" => 66.7
                }
@@ -256,8 +256,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Payment",
-                 "unique_conversions" => 5,
-                 "total_conversions" => 5,
+                 "visitors" => 5,
+                 "events" => 5,
                  "prop_names" => [],
                  "conversion_rate" => 100.0,
                  "average_revenue" => %{"short" => "€166.7M", "long" => "€166,733,566.75"},
@@ -294,27 +294,27 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
                  "conversion_rate" => 33.3,
                  "name" => "Payment",
                  "prop_names" => [],
-                 "total_conversions" => 1,
+                 "events" => 1,
                  "total_revenue" => %{"long" => "€10.00", "short" => "€10.0"},
-                 "unique_conversions" => 1
+                 "visitors" => 1
                },
                %{
                  "average_revenue" => nil,
                  "conversion_rate" => 66.7,
                  "name" => "Signup",
                  "prop_names" => [],
-                 "total_conversions" => 2,
+                 "events" => 2,
                  "total_revenue" => nil,
-                 "unique_conversions" => 2
+                 "visitors" => 2
                },
                %{
                  "average_revenue" => nil,
                  "conversion_rate" => 33.3,
                  "name" => "Visit /checkout",
                  "prop_names" => [],
-                 "total_conversions" => 1,
+                 "events" => 1,
                  "total_revenue" => nil,
-                 "unique_conversions" => 1
+                 "visitors" => 1
                }
              ] == Enum.sort_by(response, & &1["name"])
     end
@@ -334,8 +334,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Signup",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 100.0
                }
@@ -370,8 +370,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Signup",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => ["variant"],
                  "conversion_rate" => 33.3
                }
@@ -408,8 +408,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Payment",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => ["logged_in"],
                  "conversion_rate" => 66.7
                }
@@ -448,15 +448,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert [%{"prop_names" => []}] = json_response(conn, 200)
     end
 
-    test "filters out garbage prop_names",
-         %{
-           conn: conn,
-           site: site
-         } do
-      site =
-        site
-        |> Plausible.Site.set_allowed_event_props(["author"])
-        |> Plausible.Repo.update!()
+    test "filters out garbage prop_names", %{conn: conn, site: site} do
+      {:ok, site} = Plausible.Props.allow(site, ["author"])
 
       populate_stats(site, [
         build(:event,
@@ -489,10 +482,7 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
            conn: conn,
            site: site
          } do
-      site =
-        site
-        |> Plausible.Site.set_allowed_event_props(["author", "logged_in"])
-        |> Plausible.Repo.update!()
+      {:ok, site} = Plausible.Props.allow(site, ["author", "logged_in"])
 
       populate_stats(site, [
         build(:event,
@@ -551,6 +541,24 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert "OnlyGarbage" in prop_names
     end
 
+    test "does not filter out special prop keys", %{conn: conn, site: site} do
+      {:ok, site} = Plausible.Props.allow(site, ["author"])
+
+      populate_stats(site, [
+        build(:event,
+          name: "Outbound Link: Click",
+          "meta.key": ["url", "path", "first_time_customer"],
+          "meta.value": ["http://link.test", "/abc", "true"]
+        )
+      ])
+
+      insert(:goal, %{site: site, event_name: "Outbound Link: Click"})
+
+      filters = Jason.encode!(%{goal: "Outbound Link: Click"})
+      conn = get(conn, "/api/stats/#{site.domain}/conversions?period=day&filters=#{filters}")
+      assert [%{"prop_names" => ["url", "path"]}] = json_response(conn, 200)
+    end
+
     test "can filter by multiple mixed goals", %{conn: conn, site: site} do
       populate_stats(site, [
         build(:pageview, pathname: "/"),
@@ -575,15 +583,15 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Signup",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                },
                %{
                  "name" => "Visit /register",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 16.7
                }
@@ -616,15 +624,15 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "CTA",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 16.7
                },
                %{
                  "name" => "Visit /register",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 16.7
                }
@@ -652,15 +660,15 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Visit /blog/**",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 66.7
                },
                %{
                  "name" => "Visit /billing/upgrade",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                }
@@ -692,15 +700,15 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Visit /blog**",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                },
                %{
                  "name" => "Signup",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 16.7
                }
@@ -733,15 +741,15 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Visit /ano**",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
+                 "visitors" => 2,
+                 "events" => 2,
                  "prop_names" => [],
                  "conversion_rate" => 33.3
                },
                %{
                  "name" => "CTA",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 16.7
                }
@@ -771,8 +779,8 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Visit /register",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => [],
                  "conversion_rate" => 25
                }
@@ -804,608 +812,10 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "name" => "Signup",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
+                 "visitors" => 1,
+                 "events" => 1,
                  "prop_names" => ["variant"],
                  "conversion_rate" => 50
-               }
-             ]
-    end
-  end
-
-  describe "GET /api/stats/:domain/property/:key" do
-    setup [:create_user, :log_in, :create_new_site]
-
-    test "returns property breakdown for goal", %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:pageview, pathname: "/"),
-        build(:pageview, pathname: "/"),
-        build(:pageview, pathname: "/register"),
-        build(:event, name: "Signup", "meta.key": ["variant"], "meta.value": ["A"]),
-        build(:event, name: "Signup", "meta.key": ["variant"], "meta.value": ["B"]),
-        build(:event, name: "Signup", "meta.key": ["variant"], "meta.value": ["B"])
-      ])
-
-      insert(:goal, %{site: site, event_name: "Signup"})
-      filters = Jason.encode!(%{goal: "Signup"})
-      prop_key = "variant"
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/#{prop_key}?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "unique_conversions" => 2,
-                 "name" => "B",
-                 "total_conversions" => 2,
-                 "conversion_rate" => 33.3
-               },
-               %{
-                 "unique_conversions" => 1,
-                 "name" => "A",
-                 "total_conversions" => 1,
-                 "conversion_rate" => 16.7
-               }
-             ]
-    end
-
-    test "returns (none) values in property breakdown for goal", %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:pageview, pathname: "/"),
-        build(:pageview, pathname: "/"),
-        build(:pageview, pathname: "/register"),
-        build(:event, name: "Signup"),
-        build(:event, name: "Signup"),
-        build(:event, name: "Signup", "meta.key": ["variant"], "meta.value": ["A"])
-      ])
-
-      insert(:goal, %{site: site, event_name: "Signup"})
-      filters = Jason.encode!(%{goal: "Signup"})
-      prop_key = "variant"
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/#{prop_key}?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "unique_conversions" => 2,
-                 "name" => "(none)",
-                 "total_conversions" => 2,
-                 "conversion_rate" => 33.3
-               },
-               %{
-                 "unique_conversions" => 1,
-                 "name" => "A",
-                 "total_conversions" => 1,
-                 "conversion_rate" => 16.7
-               }
-             ]
-    end
-
-    test "does not return (none) value in property breakdown with is filter on prop_value", %{
-      conn: conn,
-      site: site
-    } do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "0"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "0",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 50.0
-               }
-             ]
-    end
-
-    test "returns only (none) value in property breakdown with is (none) filter", %{
-      conn: conn,
-      site: site
-    } do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "(none)"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "(none)",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 50.0
-               }
-             ]
-    end
-
-    test "returns (none) value in property breakdown with is_not filter on prop_value", %{
-      conn: conn,
-      site: site
-    } do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["20"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["20"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "!0"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "20",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
-                 "conversion_rate" => 50.0
-               },
-               %{
-                 "name" => "(none)",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 25.0
-               }
-             ]
-    end
-
-    test "does not return (none) value in property breakdown with is_not (none) filter", %{
-      conn: conn,
-      site: site
-    } do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "!(none)"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "0",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 50.0
-               }
-             ]
-    end
-
-    test "does not return (none) value in property breakdown with member filter on prop_value", %{
-      conn: conn,
-      site: site
-    } do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["1"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["1"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "0|1"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "1",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
-                 "conversion_rate" => 50.0
-               },
-               %{
-                 "name" => "0",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 25.0
-               }
-             ]
-    end
-
-    test "returns (none) value in property breakdown with member filter including a (none) value",
-         %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["1"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["1"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "1|(none)"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "1",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
-                 "conversion_rate" => 50.0
-               },
-               %{
-                 "name" => "(none)",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 25.0
-               }
-             ]
-    end
-
-    test "returns (none) value in property breakdown with not_member filter on prop_value", %{
-      conn: conn,
-      site: site
-    } do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0.01"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["20"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["20"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "!0|0.01"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "20",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
-                 "conversion_rate" => 40.0
-               },
-               %{
-                 "name" => "(none)",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 20.0
-               }
-             ]
-    end
-
-    test "does not return (none) value in property breakdown with not_member filter including a (none) value",
-         %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["0"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["20"]
-        ),
-        build(:event,
-          name: "Purchase",
-          "meta.key": ["cost"],
-          "meta.value": ["20"]
-        ),
-        build(:event, name: "Purchase")
-      ])
-
-      insert(:goal, %{site: site, event_name: "Purchase"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "Purchase",
-          props: %{cost: "!0|(none)"}
-        })
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/cost?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "20",
-                 "unique_conversions" => 2,
-                 "total_conversions" => 2,
-                 "conversion_rate" => 50.0
-               }
-             ]
-    end
-
-    test "returns property breakdown with a pageview goal filter", %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:pageview, pathname: "/"),
-        build(:pageview, pathname: "/register"),
-        build(:pageview, pathname: "/register", "meta.key": ["variant"], "meta.value": ["A"]),
-        build(:pageview, pathname: "/register", "meta.key": ["variant"], "meta.value": ["A"])
-      ])
-
-      insert(:goal, %{site: site, page_path: "/register"})
-      filters = Jason.encode!(%{goal: "Visit /register"})
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/variant?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "unique_conversions" => 2,
-                 "name" => "A",
-                 "total_conversions" => 2,
-                 "conversion_rate" => 50.0
-               },
-               %{
-                 "unique_conversions" => 1,
-                 "name" => "(none)",
-                 "total_conversions" => 1,
-                 "conversion_rate" => 25.0
-               }
-             ]
-    end
-
-    test "property breakdown with prop filter", %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:pageview, user_id: 1),
-        build(:event, user_id: 1, name: "Signup", "meta.key": ["variant"], "meta.value": ["A"]),
-        build(:pageview, user_id: 2),
-        build(:event, user_id: 2, name: "Signup", "meta.key": ["variant"], "meta.value": ["B"])
-      ])
-
-      insert(:goal, %{site: site, event_name: "Signup"})
-      filters = Jason.encode!(%{goal: "Signup", props: %{"variant" => "B"}})
-      prop_key = "variant"
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/#{prop_key}?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "unique_conversions" => 1,
-                 "name" => "B",
-                 "total_conversions" => 1,
-                 "conversion_rate" => 50.0
-               }
-             ]
-    end
-
-    test "Property breakdown with prop and goal filter", %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:pageview, user_id: 1, utm_campaign: "campaignA"),
-        build(:event,
-          user_id: 1,
-          name: "ButtonClick",
-          "meta.key": ["variant"],
-          "meta.value": ["A"]
-        ),
-        build(:pageview, user_id: 2, utm_campaign: "campaignA"),
-        build(:event,
-          user_id: 2,
-          name: "ButtonClick",
-          "meta.key": ["variant"],
-          "meta.value": ["B"]
-        )
-      ])
-
-      insert(:goal, %{site: site, event_name: "ButtonClick"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "ButtonClick",
-          props: %{variant: "A"},
-          utm_campaign: "campaignA"
-        })
-
-      prop_key = "variant"
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/#{prop_key}?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "A",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 50.0
-               }
-             ]
-    end
-
-    test "Property breakdown with goal and source filter", %{conn: conn, site: site} do
-      populate_stats(site, [
-        build(:pageview, user_id: 1, referrer_source: "Google"),
-        build(:event,
-          user_id: 1,
-          name: "ButtonClick",
-          "meta.key": ["variant"],
-          "meta.value": ["A"]
-        ),
-        build(:pageview, user_id: 2, referrer_source: "Google"),
-        build(:pageview, user_id: 3, referrer_source: "ignore"),
-        build(:event,
-          user_id: 3,
-          name: "ButtonClick",
-          "meta.key": ["variant"],
-          "meta.value": ["B"]
-        )
-      ])
-
-      insert(:goal, %{site: site, event_name: "ButtonClick"})
-
-      filters =
-        Jason.encode!(%{
-          goal: "ButtonClick",
-          source: "Google"
-        })
-
-      prop_key = "variant"
-
-      conn =
-        get(
-          conn,
-          "/api/stats/#{site.domain}/property/#{prop_key}?period=day&filters=#{filters}"
-        )
-
-      assert json_response(conn, 200) == [
-               %{
-                 "name" => "A",
-                 "unique_conversions" => 1,
-                 "total_conversions" => 1,
-                 "conversion_rate" => 50.0
                }
              ]
     end
@@ -1470,58 +880,58 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "conversion_rate" => 100.0,
-                 "unique_conversions" => 8,
+                 "visitors" => 8,
                  "name" => "Visit /**",
-                 "total_conversions" => 8,
+                 "events" => 8,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 37.5,
-                 "unique_conversions" => 3,
+                 "visitors" => 3,
                  "name" => "Visit /signup/**",
-                 "total_conversions" => 3,
+                 "events" => 3,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 37.5,
-                 "unique_conversions" => 3,
+                 "visitors" => 3,
                  "name" => "Visit /*",
-                 "total_conversions" => 3,
+                 "events" => 3,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 25.0,
-                 "unique_conversions" => 2,
+                 "visitors" => 2,
                  "name" => "Visit /billing**/success",
-                 "total_conversions" => 2,
+                 "events" => 2,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 25.0,
-                 "unique_conversions" => 2,
+                 "visitors" => 2,
                  "name" => "Visit /reg*",
-                 "total_conversions" => 2,
+                 "events" => 2,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 12.5,
-                 "unique_conversions" => 1,
+                 "visitors" => 1,
                  "name" => "Visit /signup/*",
-                 "total_conversions" => 1,
+                 "events" => 1,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 12.5,
-                 "unique_conversions" => 1,
+                 "visitors" => 1,
                  "name" => "Visit /billing*/success",
-                 "total_conversions" => 1,
+                 "events" => 1,
                  "prop_names" => []
                },
                %{
                  "conversion_rate" => 12.5,
-                 "unique_conversions" => 1,
+                 "visitors" => 1,
                  "name" => "Visit /register",
-                 "total_conversions" => 1,
+                 "events" => 1,
                  "prop_names" => []
                }
              ]
@@ -1556,9 +966,9 @@ defmodule PlausibleWeb.Api.StatsController.ConversionsTest do
       assert json_response(conn, 200) == [
                %{
                  "conversion_rate" => 100.0,
-                 "unique_conversions" => 2,
+                 "visitors" => 2,
                  "name" => "Visit /register**",
-                 "total_conversions" => 2,
+                 "events" => 2,
                  "prop_names" => ["logged_in", "author"]
                }
              ]

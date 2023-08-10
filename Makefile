@@ -15,13 +15,13 @@ install: ## Run the initial setup
 server: ## Start the web server
 	mix phx.server
 
-CH_FLAGS ?= --detach -p 8123:8123 --ulimit nofile=262144:262144 --name plausible_clickhouse
+CH_FLAGS ?= --detach -p 8123:8123 -p 9000:9000 --ulimit nofile=262144:262144 --name plausible_clickhouse
 
 clickhouse: ## Start a container with a recent version of clickhouse
 	docker run $(CH_FLAGS) --volume=$$PWD/.clickhouse_db_vol:/var/lib/clickhouse clickhouse/clickhouse-server:22.9-alpine
 
 clickhouse-prod: ## Start a container with the same version of clickhouse as the one in prod
-	docker run $(CH_FLAGS) --volume=$$PWD/.clickhouse_db_vol_prod:/var/lib/clickhouse clickhouse/clickhouse-server:22.8.13.20-alpine
+	docker run $(CH_FLAGS) --volume=$$PWD/.clickhouse_db_vol_prod:/var/lib/clickhouse clickhouse/clickhouse-server:23.3.7.5-alpine
 
 clickhouse-stop: ## Stop and remove the clickhouse container
 	docker stop plausible_clickhouse && docker rm plausible_clickhouse
