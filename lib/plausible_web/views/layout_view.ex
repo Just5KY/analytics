@@ -1,9 +1,7 @@
 defmodule PlausibleWeb.LayoutView do
   use PlausibleWeb, :view
-
-  def base_domain do
-    PlausibleWeb.Endpoint.host()
-  end
+  use Plausible
+  alias PlausibleWeb.Components.Billing.Notice
 
   def plausible_url do
     PlausibleWeb.Endpoint.url()
@@ -11,6 +9,27 @@ defmodule PlausibleWeb.LayoutView do
 
   def websocket_url() do
     PlausibleWeb.Endpoint.websocket_url()
+  end
+
+  defmodule JWT do
+    use Joken.Config
+  end
+
+  def feedback_link(user) do
+    token_params = %{
+      "id" => user.id,
+      "email" => user.email,
+      "name" => user.name,
+      "imageUrl" => Plausible.Auth.User.profile_img_url(user)
+    }
+
+    case JWT.generate_and_sign(token_params) do
+      {:ok, token, _claims} ->
+        "https://feedback.plausible.io/sso/#{token}?returnUrl=https://feedback.plausible.io"
+
+      _ ->
+        "https://feedback.plausible.io"
+    end
   end
 
   def home_dest(conn) do
@@ -23,23 +42,18 @@ defmodule PlausibleWeb.LayoutView do
 
   def settings_tabs(conn) do
     [
-      [key: "General", value: "general"],
-      [key: "People", value: "people"],
-      [key: "Visibility", value: "visibility"],
-      [key: "Goals", value: "goals"],
-      if Plausible.Funnels.enabled_for?(conn.assigns[:current_user]) do
-        [key: "Funnels", value: "funnels"]
+      [key: "General", value: "general", icon: :rocket_launch],
+      [key: "People", value: "people", icon: :users],
+      [key: "Visibility", value: "visibility", icon: :eye],
+      [key: "Goals", value: "goals", icon: :check_circle],
+      on_full_build do
+        [key: "Funnels", value: "funnels", icon: :funnel]
       end,
-      if Plausible.Props.enabled_for?(conn.assigns[:current_user]) do
-        [key: "Custom Properties", value: "properties"]
-      end,
-      [key: "Search Console", value: "search-console"],
-      [key: "Email reports", value: "email-reports"],
-      if !is_selfhost() && conn.assigns[:site].custom_domain do
-        [key: "Custom domain", value: "custom-domain"]
-      end,
+      [key: "Custom Properties", value: "properties", icon: :document_text],
+      [key: "Integrations", value: "integrations", icon: :arrow_path_rounded_square],
+      [key: "Email Reports", value: "email-reports", icon: :envelope],
       if conn.assigns[:current_user_role] == :owner do
-        [key: "Danger zone", value: "danger-zone"]
+        [key: "Danger Zone", value: "danger-zone", icon: :exclamation_triangle]
       end
     ]
   end
@@ -74,9 +88,5 @@ defmodule PlausibleWeb.LayoutView do
 
   def is_current_tab(conn, tab) do
     List.last(conn.path_info) == tab
-  end
-
-  defp is_selfhost() do
-    Application.get_env(:plausible, :is_selfhost)
   end
 end

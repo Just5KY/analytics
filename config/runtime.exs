@@ -6,7 +6,45 @@ if config_env() in [:dev, :test] do
   Envy.load(["config/.env.#{config_env()}"])
 end
 
+if config_env() == :small_dev do
+  Envy.load(["config/.env.dev"])
+end
+
+if config_env() == :small_test do
+  Envy.load(["config/.env.test"])
+end
+
 config_dir = System.get_env("CONFIG_DIR", "/run/secrets")
+
+log_format =
+  get_var_from_path_or_env(config_dir, "LOG_FORMAT", "standard")
+
+log_level =
+  config_dir
+  |> get_var_from_path_or_env("LOG_LEVEL", "warning")
+  |> String.to_existing_atom()
+
+config :logger,
+  level: log_level,
+  backends: [:console]
+
+config :logger, Sentry.LoggerBackend,
+  capture_log_messages: true,
+  level: :error
+
+case String.downcase(log_format) do
+  "standard" ->
+    config :logger, :console,
+      format: "$time $metadata[$level] $message\n",
+      metadata: [:request_id]
+
+  "json" ->
+    config :logger, :console,
+      format: {ExJsonLogger, :format},
+      metadata: [
+        :request_id
+      ]
+end
 
 # Listen IP supports IPv4 and IPv6 addresses.
 listen_ip =
@@ -102,10 +140,30 @@ ch_db_url =
   |> get_var_from_path_or_env("CLICKHOUSE_FLUSH_INTERVAL_MS", "5000")
   |> Integer.parse()
 
+if get_var_from_path_or_env(config_dir, "CLICKHOUSE_MAX_BUFFER_SIZE") do
+  Logger.warning(
+    "CLICKHOUSE_MAX_BUFFER_SIZE is deprecated, please use CLICKHOUSE_MAX_BUFFER_SIZE_BYTES instead"
+  )
+end
+
 {ch_max_buffer_size, ""} =
   config_dir
-  |> get_var_from_path_or_env("CLICKHOUSE_MAX_BUFFER_SIZE", "10000")
+  |> get_var_from_path_or_env("CLICKHOUSE_MAX_BUFFER_SIZE_BYTES", "100000")
   |> Integer.parse()
+
+# Can be generated  with `Base.encode64(:crypto.strong_rand_bytes(32))` from
+# iex shell or `openssl rand -base64 32` from command line.
+totp_vault_key = get_var_from_path_or_env(config_dir, "TOTP_VAULT_KEY", nil)
+
+case totp_vault_key do
+  nil ->
+    raise "TOTP_VAULT_KEY configuration option is required. See https://plausible.io/docs/self-hosting-configuration#server"
+
+  key ->
+    if byte_size(Base.decode64!(key)) != 32 do
+      raise "TOTP_VAULT_KEY must exactly 32 bytes long. See https://plausible.io/docs/self-hosting-configuration#server"
+    end
+end
 
 ### Mandatory params End
 
@@ -119,13 +177,13 @@ build_metadata =
     {:error, error} ->
       error = Exception.format(:error, error)
 
-      Logger.warn("""
+      Logger.warning("""
       failed to parse $BUILD_METADATA: #{error}
 
           $BUILD_METADATA is set to #{build_metadata_raw}\
       """)
 
-      Logger.warn("falling back to empty build metadata, as if $BUILD_METADATA was set to {}")
+      Logger.warning("falling back to empty build metadata, as if $BUILD_METADATA was set to {}")
 
       _fallback = %{}
   end
@@ -139,6 +197,8 @@ runtime_metadata = [
 
 config :plausible, :runtime_metadata, runtime_metadata
 
+config :plausible, Plausible.Auth.TOTP, vault_key: totp_vault_key
+
 sentry_dsn = get_var_from_path_or_env(config_dir, "SENTRY_DSN")
 honeycomb_api_key = get_var_from_path_or_env(config_dir, "HONEYCOMB_API_KEY")
 honeycomb_dataset = get_var_from_path_or_env(config_dir, "HONEYCOMB_DATASET")
@@ -147,6 +207,11 @@ paddle_vendor_id = get_var_from_path_or_env(config_dir, "PADDLE_VENDOR_ID")
 google_cid = get_var_from_path_or_env(config_dir, "GOOGLE_CLIENT_ID")
 google_secret = get_var_from_path_or_env(config_dir, "GOOGLE_CLIENT_SECRET")
 postmark_api_key = get_var_from_path_or_env(config_dir, "POSTMARK_API_KEY")
+
+{otel_sampler_ratio, ""} =
+  config_dir
+  |> get_var_from_path_or_env("OTEL_SAMPLER_RATIO", "0.5")
+  |> Float.parse()
 
 cron_enabled =
   config_dir
@@ -164,10 +229,10 @@ ip_geolocation_db = get_var_from_path_or_env(config_dir, "IP_GEOLOCATION_DB", ge
 geonames_source_file = get_var_from_path_or_env(config_dir, "GEONAMES_SOURCE_FILE")
 maxmind_license_key = get_var_from_path_or_env(config_dir, "MAXMIND_LICENSE_KEY")
 maxmind_edition = get_var_from_path_or_env(config_dir, "MAXMIND_EDITION", "GeoLite2-City")
+maxmind_cache_dir = get_var_from_path_or_env(config_dir, "PERSISTENT_CACHE_DIR")
 
 if System.get_env("DISABLE_AUTH") do
-  require Logger
-  Logger.warn("DISABLE_AUTH env var is no longer supported")
+  Logger.warning("DISABLE_AUTH env var is no longer supported")
 end
 
 enable_email_verification =
@@ -195,25 +260,9 @@ end
 hcaptcha_sitekey = get_var_from_path_or_env(config_dir, "HCAPTCHA_SITEKEY")
 hcaptcha_secret = get_var_from_path_or_env(config_dir, "HCAPTCHA_SECRET")
 
-log_level =
-  config_dir
-  |> get_var_from_path_or_env("LOG_LEVEL", "warn")
-  |> String.to_existing_atom()
-
 custom_script_name =
   config_dir
   |> get_var_from_path_or_env("CUSTOM_SCRIPT_NAME", "script")
-
-{site_limit, ""} =
-  config_dir
-  |> get_var_from_path_or_env("SITE_LIMIT", "50")
-  |> Integer.parse()
-
-site_limit_exempt =
-  config_dir
-  |> get_var_from_path_or_env("SITE_LIMIT_EXEMPT", "")
-  |> String.split(",")
-  |> Enum.map(&String.trim/1)
 
 disable_cron =
   config_dir
@@ -237,12 +286,15 @@ if byte_size(websocket_url) > 0 and
   """
 end
 
+secure_cookie =
+  config_dir
+  |> get_var_from_path_or_env("SECURE_COOKIE", if(is_selfhost, do: "false", else: "true"))
+  |> String.to_existing_atom()
+
 config :plausible,
   environment: env,
   mailer_email: mailer_email,
   super_admin_user_ids: super_admin_user_ids,
-  site_limit: site_limit,
-  site_limit_exempt: site_limit_exempt,
   is_selfhost: is_selfhost,
   custom_script_name: custom_script_name,
   log_failed_login_attempts: log_failed_login_attempts
@@ -260,14 +312,24 @@ config :plausible, PlausibleWeb.Endpoint,
     protocol_options: [max_request_line_length: 8192, max_header_value_length: 8192]
   ],
   secret_key_base: secret_key_base,
-  websocket_url: websocket_url
+  websocket_url: websocket_url,
+  secure_cookie: secure_cookie
 
 maybe_ipv6 = if System.get_env("ECTO_IPV6"), do: [:inet6], else: []
+
+db_cacertfile = get_var_from_path_or_env(config_dir, "DATABASE_CACERTFILE", CAStore.file_path())
 
 if is_nil(db_socket_dir) do
   config :plausible, Plausible.Repo,
     url: db_url,
-    socket_options: maybe_ipv6
+    socket_options: maybe_ipv6,
+    ssl_opts: [
+      cacertfile: db_cacertfile,
+      verify: :verify_peer,
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ]
 else
   config :plausible, Plausible.Repo,
     socket_dir: db_socket_dir,
@@ -290,10 +352,6 @@ config :sentry,
   filter: Plausible.SentryFilter,
   before_send_event: {Plausible.SentryFilter, :before_send}
 
-config :logger, Sentry.LoggerBackend,
-  capture_log_messages: true,
-  level: :error
-
 config :plausible, :paddle,
   vendor_auth_code: paddle_auth_code,
   vendor_id: paddle_vendor_id
@@ -302,12 +360,16 @@ config :plausible, :google,
   client_id: google_cid,
   client_secret: google_secret,
   api_url: "https://www.googleapis.com",
-  reporting_api_url: "https://analyticsreporting.googleapis.com",
-  max_buffer_size: get_int_from_path_or_env(config_dir, "GOOGLE_MAX_BUFFER_SIZE", 10_000)
+  reporting_api_url: "https://analyticsreporting.googleapis.com"
+
+config :plausible, :imported,
+  max_buffer_size: get_int_from_path_or_env(config_dir, "IMPORTED_MAX_BUFFER_SIZE", 10_000)
 
 maybe_ch_ipv6 =
   get_var_from_path_or_env(config_dir, "ECTO_CH_IPV6", "false")
   |> String.to_existing_atom()
+
+ch_cacertfile = get_var_from_path_or_env(config_dir, "CLICKHOUSE_CACERTFILE")
 
 ch_transport_opts = [
   keepalive: true,
@@ -315,8 +377,14 @@ ch_transport_opts = [
   inet6: maybe_ch_ipv6
 ]
 
+ch_transport_opts =
+  if ch_cacertfile do
+    ch_transport_opts ++ [cacertfile: ch_cacertfile]
+  else
+    ch_transport_opts
+  end
+
 config :plausible, Plausible.ClickhouseRepo,
-  loggers: [Ecto.LogEntry],
   queue_target: 500,
   queue_interval: 2000,
   url: ch_db_url,
@@ -326,7 +394,6 @@ config :plausible, Plausible.ClickhouseRepo,
   ]
 
 config :plausible, Plausible.IngestRepo,
-  loggers: [Ecto.LogEntry],
   queue_target: 500,
   queue_interval: 2000,
   url: ch_db_url,
@@ -336,7 +403,6 @@ config :plausible, Plausible.IngestRepo,
   pool_size: ingest_pool_size
 
 config :plausible, Plausible.AsyncInsertRepo,
-  loggers: [Ecto.LogEntry],
   queue_target: 500,
   queue_interval: 2000,
   url: ch_db_url,
@@ -348,7 +414,6 @@ config :plausible, Plausible.AsyncInsertRepo,
   ]
 
 config :plausible, Plausible.ImportDeletionRepo,
-  loggers: [Ecto.LogEntry],
   queue_target: 500,
   queue_interval: 2000,
   url: ch_db_url,
@@ -429,8 +494,6 @@ base_cron = [
   {"0 12 * * *", Plausible.Workers.SendCheckStatsEmails},
   # Every 15 minutes
   {"*/15 * * * *", Plausible.Workers.SpikeNotifier},
-  # Every day at midnight
-  {"0 0 * * *", Plausible.Workers.CleanEmailVerificationCodes},
   # Every day at 1am
   {"0 1 * * *", Plausible.Workers.CleanInvitations},
   # Every 2 hours
@@ -445,7 +508,9 @@ cloud_cron = [
   # Daily at 15
   {"0 15 * * *", Plausible.Workers.NotifyAnnualRenewal},
   # Every midnight
-  {"0 0 * * *", Plausible.Workers.LockSites}
+  {"0 0 * * *", Plausible.Workers.LockSites},
+  # Daily at 5
+  {"0 5 * * *", Plausible.Workers.AcceptTrafficUntil}
 ]
 
 crontab = if(is_selfhost, do: base_cron, else: base_cron ++ cloud_cron)
@@ -457,10 +522,12 @@ base_queues = [
   spike_notifications: 1,
   check_stats_emails: 1,
   site_setup_emails: 1,
-  clean_email_verification_codes: 1,
   clean_invitations: 1,
+  # NOTE: to be removed once #3700 is released
   google_analytics_imports: 1,
-  domain_change_transition: 1
+  analytics_imports: 1,
+  domain_change_transition: 1,
+  check_accept_traffic_until: 1
 ]
 
 cloud_queues = [
@@ -484,8 +551,7 @@ cond do
         {Oban.Plugins.Pruner, max_age: thirty_days_in_seconds},
         {Oban.Plugins.Cron, crontab: if(cron_enabled, do: crontab, else: [])},
         # Rescue orphaned jobs after 2 hours
-        {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(120)},
-        {Oban.Plugins.Stager, interval: :timer.seconds(5)}
+        {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(120)}
       ],
       queues: if(cron_enabled, do: queues, else: []),
       peer: if(cron_enabled, do: Oban.Peers.Postgres, else: false)
@@ -501,6 +567,9 @@ config :plausible, :hcaptcha,
   sitekey: hcaptcha_sitekey,
   secret: hcaptcha_secret
 
+nolt_sso_secret = get_var_from_path_or_env(config_dir, "NOLT_SSO_SECRET")
+config :joken, default_signer: nolt_sso_secret
+
 config :plausible, Plausible.Sentry.Client,
   finch_request_opts: [
     pool_timeout: get_int_from_path_or_env(config_dir, "SENTRY_FINCH_POOL_TIMEOUT", 5000),
@@ -513,35 +582,34 @@ config :ref_inspector,
 config :ua_inspector,
   init: {Plausible.Release, :configure_ua_inspector}
 
-config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60 * 4, cleanup_interval_ms: 60_000 * 10]}
-
-config :kaffy,
-  otp_app: :plausible,
-  ecto_repo: Plausible.Repo,
-  router: PlausibleWeb.Router,
-  admin_title: "Plausible Admin",
-  resources: [
-    auth: [
-      resources: [
-        user: [schema: Plausible.Auth.User, admin: Plausible.Auth.UserAdmin],
-        api_key: [schema: Plausible.Auth.ApiKey, admin: Plausible.Auth.ApiKeyAdmin]
-      ]
-    ],
-    sites: [
-      resources: [
-        site: [schema: Plausible.Site, admin: Plausible.SiteAdmin]
-      ]
-    ],
-    billing: [
-      resources: [
-        enterprise_plan: [
-          schema: Plausible.Billing.EnterprisePlan,
-          admin: Plausible.Billing.EnterprisePlanAdmin
+if config_env() in [:dev, :staging, :prod] do
+  config :kaffy,
+    otp_app: :plausible,
+    ecto_repo: Plausible.Repo,
+    router: PlausibleWeb.Router,
+    admin_title: "Plausible Admin",
+    resources: [
+      auth: [
+        resources: [
+          user: [schema: Plausible.Auth.User, admin: Plausible.Auth.UserAdmin],
+          api_key: [schema: Plausible.Auth.ApiKey, admin: Plausible.Auth.ApiKeyAdmin]
+        ]
+      ],
+      sites: [
+        resources: [
+          site: [schema: Plausible.Site, admin: Plausible.SiteAdmin]
+        ]
+      ],
+      billing: [
+        resources: [
+          enterprise_plan: [
+            schema: Plausible.Billing.EnterprisePlan,
+            admin: Plausible.Billing.EnterprisePlanAdmin
+          ]
         ]
       ]
     ]
-  ]
+end
 
 geo_opts =
   cond do
@@ -549,6 +617,7 @@ geo_opts =
       [
         license_key: maxmind_license_key,
         edition: maxmind_edition,
+        cache_dir: maxmind_cache_dir,
         async: true
       ]
 
@@ -580,14 +649,10 @@ if geonames_source_file do
   config :location, :geonames_source_file, geonames_source_file
 end
 
-config :logger,
-  level: log_level,
-  backends: [:console]
-
 if honeycomb_api_key && honeycomb_dataset do
   config :opentelemetry,
     resource: Plausible.OpenTelemetry.resource_attributes(runtime_metadata),
-    sampler: {Plausible.OpenTelemetry.Sampler, nil},
+    sampler: {Plausible.OpenTelemetry.Sampler, %{ratio: otel_sampler_ratio}},
     span_processor: :batch,
     traces_exporter: :otlp
 

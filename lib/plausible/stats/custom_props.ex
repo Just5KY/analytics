@@ -22,18 +22,6 @@ defmodule Plausible.Stats.CustomProps do
     |> Enum.into(%{})
   end
 
-  @doc """
-  Expects a single goal filter in the query. Returns a list of custom
-  props for that goal. Works for both custom event and pageview goals.
-  """
-  def props_for_goal(site, query) do
-    case query.filters["event:goal"] do
-      {:is, _} -> fetch_prop_names(site, query)
-      {:matches, _} -> fetch_prop_names(site, query)
-      _ -> []
-    end
-  end
-
   def fetch_prop_names(site, query) do
     case Query.get_filter_by_prefix(query, "event:props:") do
       {"event:props:" <> key, _} ->
@@ -45,15 +33,15 @@ defmodule Plausible.Stats.CustomProps do
           select: meta.key,
           distinct: true
         )
-        |> maybe_allowed_props_only(site.allowed_event_props)
+        |> maybe_allowed_props_only(site)
         |> ClickhouseRepo.all()
     end
   end
 
-  def maybe_allowed_props_only(q, allowed_props) when is_list(allowed_props) do
-    props = allowed_props ++ Plausible.Props.internal_keys()
-    from [..., m] in q, where: m.key in ^props
+  def maybe_allowed_props_only(q, site) do
+    case Plausible.Props.allowed_for(site) do
+      :all -> q
+      allowed_props -> from [..., m] in q, where: m.key in ^allowed_props
+    end
   end
-
-  def maybe_allowed_props_only(q, nil), do: q
 end

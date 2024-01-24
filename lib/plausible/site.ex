@@ -6,6 +6,7 @@ defmodule Plausible.Site do
   import Ecto.Changeset
   alias Plausible.Auth.User
   alias Plausible.Site.GoogleAuth
+  alias Plausible.Timezones
 
   @type t() :: %__MODULE__{}
 
@@ -39,16 +40,25 @@ defmodule Plausible.Site do
     has_one :google_auth, GoogleAuth
     has_one :weekly_report, Plausible.Site.WeeklyReport
     has_one :monthly_report, Plausible.Site.MonthlyReport
-    has_one :custom_domain, Plausible.Site.CustomDomain
     has_one :spike_notification, Plausible.Site.SpikeNotification
+    has_one :ownership, Plausible.Site.Membership, where: [role: :owner]
+    has_one :owner, through: [:ownership, :user]
 
     # If `from_cache?` is set, the struct might be incomplete - see `Plausible.Site.Cache`.
     # Use `Plausible.Repo.reload!(cached_site)` to pre-fill missing fields if
     # strictly necessary.
     field :from_cache?, :boolean, virtual: true, default: false
 
+    # Used in the context of paginated sites list to order in relation to
+    # user's membership state. Currently it can be either "invitation",
+    # "pinned_site" or "site", where invitations are first.
+    field :entry_type, :string, virtual: true
+    field :pinned_at, :naive_datetime, virtual: true
+
     timestamps()
   end
+
+  def new(params), do: changeset(%__MODULE__{}, params)
 
   @domain_unique_error """
   This domain cannot be registered. Perhaps one of your colleagues registered it? If that's not the case, please contact support@plausible.io
@@ -59,6 +69,7 @@ defmodule Plausible.Site do
     |> cast(attrs, [:domain, :timezone])
     |> clean_domain()
     |> validate_required([:domain, :timezone])
+    |> validate_timezone()
     |> validate_domain_format()
     |> validate_domain_reserved_characters()
     |> unique_constraint(:domain,
@@ -166,21 +177,6 @@ defmodule Plausible.Site do
     )
   end
 
-  @togglable_features ~w[conversions_enabled funnels_enabled props_enabled]a
-  def feature_toggle_change(site, property, opts \\ [])
-      when property in @togglable_features do
-    override = Keyword.get(opts, :override)
-
-    attrs =
-      if is_boolean(override) do
-        %{property => override}
-      else
-        %{property => !Map.fetch!(site, property)}
-      end
-
-    cast(site, attrs, @togglable_features)
-  end
-
   def remove_imported_data(site) do
     change(site, imported_data: nil)
   end
@@ -213,20 +209,18 @@ defmodule Plausible.Site do
 
   def local_start_date(site) do
     site.stats_start_date
-    |> Timex.Timezone.convert("UTC")
-    |> Timex.Timezone.convert(site.timezone)
-    |> Timex.to_date()
+    |> Timezones.to_date_in_timezone(site.timezone)
   end
 
   defp clean_domain(changeset) do
     clean_domain =
       (get_field(changeset, :domain) || "")
+      |> String.downcase()
       |> String.trim()
       |> String.replace_leading("http://", "")
       |> String.replace_leading("https://", "")
+      |> String.trim("/")
       |> String.replace_leading("www.", "")
-      |> String.replace_trailing("/", "")
-      |> String.downcase()
 
     change(changeset, %{domain: clean_domain})
   end
@@ -269,6 +263,16 @@ defmodule Plausible.Site do
       )
     else
       changeset
+    end
+  end
+
+  defp validate_timezone(changeset) do
+    tz = get_field(changeset, :timezone)
+
+    if Timex.is_valid_timezone?(tz) do
+      changeset
+    else
+      add_error(changeset, :timezone, "is invalid")
     end
   end
 end

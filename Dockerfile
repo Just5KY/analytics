@@ -2,10 +2,12 @@
 # platform specific, it makes sense to build it in the docker
 
 #### Builder
-FROM hexpm/elixir:1.14.3-erlang-25.2.3-alpine-3.18.0 as buildcontainer
+FROM hexpm/elixir:1.16.0-erlang-26.2.1-alpine-3.18.4 as buildcontainer
+
+ARG MIX_ENV=small
 
 # preparation
-ENV MIX_ENV=prod
+ENV MIX_ENV=$MIX_ENV
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--openssl-legacy-provider
 
@@ -19,8 +21,7 @@ WORKDIR /app
 
 # install build dependencies
 RUN apk add --no-cache git nodejs yarn python3 npm ca-certificates wget gnupg make gcc libc-dev && \
-  npm install npm@latest -g && \
-  npm install -g webpack
+  npm install npm@latest -g
 
 COPY mix.exs ./
 COPY mix.lock ./
@@ -40,9 +41,10 @@ COPY assets ./assets
 COPY tracker ./tracker
 COPY priv ./priv
 COPY lib ./lib
+COPY extra ./extra
 
-RUN npm run deploy --prefix ./assets && \
-  npm run deploy --prefix ./tracker && \
+RUN npm run deploy --prefix ./tracker && \
+  mix assets.deploy && \
   mix phx.digest priv/static && \
   mix download_country_database && \
   # https://hexdocs.pm/sentry/Sentry.Sources.html#module-source-code-storage
@@ -53,12 +55,14 @@ COPY rel rel
 RUN mix release plausible
 
 # Main Docker Image
-FROM alpine:3.18.0
+FROM alpine:3.18.4
 LABEL maintainer="plausible.io <hello@plausible.io>"
 
 ARG BUILD_METADATA={}
 ENV BUILD_METADATA=$BUILD_METADATA
 ENV LANG=C.UTF-8
+ARG MIX_ENV=small
+ENV MIX_ENV=$MIX_ENV
 
 RUN apk upgrade --no-cache
 
@@ -69,7 +73,7 @@ COPY ./rel/docker-entrypoint.sh /entrypoint.sh
 RUN chmod a+x /entrypoint.sh && \
   adduser -h /app -u 1000 -s /bin/sh -D plausibleuser
 
-COPY --from=buildcontainer /app/_build/prod/rel/plausible /app
+COPY --from=buildcontainer /app/_build/${MIX_ENV}/rel/plausible /app
 RUN chown -R plausibleuser:plausibleuser /app
 USER plausibleuser
 WORKDIR /app

@@ -296,6 +296,79 @@ defmodule PlausibleWeb.Api.StatsController.TopStatsTest do
 
       assert %{"name" => "Time on page", "value" => 600} in res["top_stats"]
     end
+
+    test "doesn't calculate time on page with only single page visits", %{conn: conn, site: site} do
+      populate_stats(site, [
+        build(:pageview, pathname: "/", user_id: @user_id, timestamp: ~N[2021-01-01 00:00:00]),
+        build(:pageview, pathname: "/", user_id: @user_id, timestamp: ~N[2021-01-01 00:10:00])
+      ])
+
+      filters = Jason.encode!(%{page: "/"})
+      path = "/api/stats/#{site.domain}/top-stats?period=day&date=2021-01-01&filters=#{filters}"
+
+      assert %{"name" => "Time on page", "value" => 0} ==
+               conn
+               |> get(path)
+               |> json_response(200)
+               |> Map.fetch!("top_stats")
+               |> Enum.find(&(&1["name"] == "Time on page"))
+    end
+
+    test "ignores page refresh when calculating time on page", %{conn: conn, site: site} do
+      populate_stats(site, [
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:00:00], pathname: "/"),
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:01:00], pathname: "/"),
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:02:00], pathname: "/"),
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:03:00], pathname: "/exit")
+      ])
+
+      filters = Jason.encode!(%{page: "/"})
+      path = "/api/stats/#{site.domain}/top-stats?period=day&date=2021-01-01&filters=#{filters}"
+
+      assert %{"name" => "Time on page", "value" => _three_minutes = 180} ==
+               conn
+               |> get(path)
+               |> json_response(200)
+               |> Map.fetch!("top_stats")
+               |> Enum.find(&(&1["name"] == "Time on page"))
+    end
+
+    test "averages time on page over unique transitions across sessions", %{
+      conn: conn,
+      site: site
+    } do
+      # ┌─p──┬─p2─┬─minus(t2, t)─┬──s─┐
+      # │ /a │ /b │          100 │ s1 │
+      # │ /a │ /d │          100 │ s2 │ <- these two get treated
+      # │ /a │ /d │            0 │ s2 │ <- as single page transition
+      # └────┴────┴──────────────┴────┘
+      # so that time_on_page(a)=(100+100)/uniq(transition)=200/2=100
+
+      s1 = @user_id
+      s2 = @user_id + 1
+
+      now = ~N[2021-01-01 00:00:00]
+      later = fn seconds -> NaiveDateTime.add(now, seconds) end
+
+      populate_stats(site, [
+        build(:pageview, user_id: s1, timestamp: now, pathname: "/a"),
+        build(:pageview, user_id: s1, timestamp: later.(100), pathname: "/b"),
+        build(:pageview, user_id: s2, timestamp: now, pathname: "/a"),
+        build(:pageview, user_id: s2, timestamp: later.(100), pathname: "/d"),
+        build(:pageview, user_id: s2, timestamp: later.(100), pathname: "/a"),
+        build(:pageview, user_id: s2, timestamp: later.(100), pathname: "/d")
+      ])
+
+      filters = Jason.encode!(%{page: "/a"})
+      path = "/api/stats/#{site.domain}/top-stats?period=day&date=2021-01-01&filters=#{filters}"
+
+      assert %{"name" => "Time on page", "value" => 100} ==
+               conn
+               |> get(path)
+               |> json_response(200)
+               |> Map.fetch!("top_stats")
+               |> Enum.find(&(&1["name"] == "Time on page"))
+    end
   end
 
   describe "GET /api/stats/top-stats - with imported data" do
@@ -691,6 +764,7 @@ defmodule PlausibleWeb.Api.StatsController.TopStatsTest do
       assert %{"name" => "Conversion rate", "value" => 33.3} in res["top_stats"]
     end
 
+    @tag :full_build_only
     test "returns average and total when filtering by a revenue goal", %{conn: conn, site: site} do
       insert(:goal, site: site, event_name: "Payment", currency: "USD")
       insert(:goal, site: site, event_name: "AddToCart", currency: "EUR")
@@ -733,6 +807,7 @@ defmodule PlausibleWeb.Api.StatsController.TopStatsTest do
              } in top_stats
     end
 
+    @tag :full_build_only
     test "returns average and total when filtering by many revenue goals with same currency", %{
       conn: conn,
       site: site
@@ -818,6 +893,28 @@ defmodule PlausibleWeb.Api.StatsController.TopStatsTest do
       ])
 
       filters = Jason.encode!(%{goal: "Payment|AddToCart"})
+      conn = get(conn, "/api/stats/#{site.domain}/top-stats?period=all&filters=#{filters}")
+      assert %{"top_stats" => top_stats} = json_response(conn, 200)
+
+      metrics = Enum.map(top_stats, & &1["name"])
+      refute "Average revenue" in metrics
+      refute "Total revenue" in metrics
+    end
+
+    test "does not return average and total when site owner is on a growth plan",
+         %{conn: conn, site: site, user: user} do
+      insert(:growth_subscription, user: user)
+      insert(:goal, site: site, event_name: "Payment", currency: "USD")
+
+      populate_stats(site, [
+        build(:event,
+          name: "Payment",
+          revenue_reporting_amount: Decimal.new(13_29),
+          revenue_reporting_currency: "USD"
+        )
+      ])
+
+      filters = Jason.encode!(%{goal: "Payment"})
       conn = get(conn, "/api/stats/#{site.domain}/top-stats?period=all&filters=#{filters}")
       assert %{"top_stats" => top_stats} = json_response(conn, 200)
 

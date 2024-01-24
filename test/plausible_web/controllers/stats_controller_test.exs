@@ -1,7 +1,9 @@
 defmodule PlausibleWeb.StatsControllerTest do
-  use PlausibleWeb.ConnCase, async: true
+  use PlausibleWeb.ConnCase, async: false
   use Plausible.Repo
   import Plausible.Test.Support.HTML
+
+  @react_container "div#stats-react-container"
 
   describe "GET /:website - anonymous user" do
     test "public site - shows site stats", %{conn: conn} do
@@ -10,7 +12,10 @@ defmodule PlausibleWeb.StatsControllerTest do
 
       conn = get(conn, "/#{site.domain}")
       resp = html_response(conn, 200)
-      assert element_exists?(resp, "div#stats-react-container")
+      assert element_exists?(resp, @react_container)
+
+      assert text_of_attr(resp, @react_container, "data-domain") == site.domain
+      assert text_of_attr(resp, @react_container, "data-is-dbip") == "false"
 
       assert ["noindex, nofollow"] ==
                resp
@@ -26,7 +31,7 @@ defmodule PlausibleWeb.StatsControllerTest do
 
       conn = get(conn, "/#{site.domain}")
       resp = html_response(conn, 200)
-      assert element_exists?(resp, "div#stats-react-container")
+      assert element_exists?(resp, @react_container)
 
       assert ["index, nofollow"] ==
                resp
@@ -44,8 +49,9 @@ defmodule PlausibleWeb.StatsControllerTest do
     end
 
     test "can not view stats of a private website", %{conn: conn} do
+      _ = insert(:user)
       conn = get(conn, "/test-site.com")
-      assert html_response(conn, 404) =~ "There&#39;s nothing here"
+      assert html_response(conn, 404) =~ "There's nothing here"
     end
   end
 
@@ -67,11 +73,12 @@ defmodule PlausibleWeb.StatsControllerTest do
     test "can not view stats of someone else's website", %{conn: conn} do
       site = insert(:site)
       conn = get(conn, "/" <> site.domain)
-      assert html_response(conn, 404) =~ "There&#39;s nothing here"
+      assert html_response(conn, 404) =~ "There's nothing here"
     end
   end
 
   describe "GET /:website - as a super admin" do
+    @describetag :full_build_only
     setup [:create_user, :make_user_super_admin, :log_in]
 
     test "can view a private dashboard with stats", %{conn: conn} do
@@ -134,25 +141,76 @@ defmodule PlausibleWeb.StatsControllerTest do
 
       zip = Enum.map(zip, fn {filename, _} -> filename end)
 
-      assert 'visitors.csv' in zip
-      assert 'browsers.csv' in zip
-      assert 'cities.csv' in zip
-      assert 'conversions.csv' in zip
-      assert 'countries.csv' in zip
-      assert 'custom_props.csv' in zip
-      assert 'devices.csv' in zip
-      assert 'entry_pages.csv' in zip
-      assert 'exit_pages.csv' in zip
-      assert 'operating_systems.csv' in zip
-      assert 'pages.csv' in zip
-      assert 'prop_breakdown.csv' in zip
-      assert 'regions.csv' in zip
-      assert 'sources.csv' in zip
-      assert 'utm_campaigns.csv' in zip
-      assert 'utm_contents.csv' in zip
-      assert 'utm_mediums.csv' in zip
-      assert 'utm_sources.csv' in zip
-      assert 'utm_terms.csv' in zip
+      assert ~c"visitors.csv" in zip
+      assert ~c"browsers.csv" in zip
+      assert ~c"cities.csv" in zip
+      assert ~c"conversions.csv" in zip
+      assert ~c"countries.csv" in zip
+      assert ~c"devices.csv" in zip
+      assert ~c"entry_pages.csv" in zip
+      assert ~c"exit_pages.csv" in zip
+      assert ~c"operating_systems.csv" in zip
+      assert ~c"pages.csv" in zip
+      assert ~c"regions.csv" in zip
+      assert ~c"sources.csv" in zip
+      assert ~c"utm_campaigns.csv" in zip
+      assert ~c"utm_contents.csv" in zip
+      assert ~c"utm_mediums.csv" in zip
+      assert ~c"utm_sources.csv" in zip
+      assert ~c"utm_terms.csv" in zip
+    end
+
+    test "exports only internally used props in custom_props.csv for a growth plan", %{
+      conn: conn,
+      site: site
+    } do
+      {:ok, site} = Plausible.Props.allow(site, ["author"])
+
+      site = Repo.preload(site, :owner)
+      insert(:growth_subscription, user: site.owner)
+
+      populate_stats(site, [
+        build(:pageview, "meta.key": ["author"], "meta.value": ["a"]),
+        build(:event, name: "File Download", "meta.key": ["url"], "meta.value": ["b"])
+      ])
+
+      conn = get(conn, "/" <> site.domain <> "/export?period=day")
+      assert response = response(conn, 200)
+      {:ok, zip} = :zip.unzip(response, [:memory])
+
+      {_filename, result} =
+        Enum.find(zip, fn {filename, _data} -> filename == ~c"custom_props.csv" end)
+
+      assert parse_csv(result) == [
+               ["property", "value", "visitors", "events", "percentage"],
+               ["url", "b", "1", "1", "50.0"],
+               ["url", "(none)", "1", "1", "50.0"],
+               [""]
+             ]
+    end
+
+    test "does not include custom_props.csv for a growth plan if no internal props used", %{
+      conn: conn,
+      site: site
+    } do
+      {:ok, site} = Plausible.Props.allow(site, ["author"])
+
+      site = Repo.preload(site, :owner)
+      insert(:growth_subscription, user: site.owner)
+
+      populate_stats(site, [
+        build(:pageview, "meta.key": ["author"], "meta.value": ["a"])
+      ])
+
+      {:ok, zip} =
+        conn
+        |> get("/#{site.domain}/export?period=day")
+        |> response(200)
+        |> :zip.unzip([:memory])
+
+      files = Map.new(zip)
+
+      refute Map.has_key?(files, ~c"custom_props.csv")
     end
 
     test "exports data in zipped csvs", %{conn: conn, site: site} do
@@ -170,7 +228,7 @@ defmodule PlausibleWeb.StatsControllerTest do
              |> response(400)
     end
 
-    test "exports allowed event props", %{conn: conn, site: site} do
+    test "exports allowed event props for a trial account", %{conn: conn, site: site} do
       {:ok, site} = Plausible.Props.allow(site, ["author", "logged_in"])
 
       populate_stats(site, [
@@ -188,7 +246,7 @@ defmodule PlausibleWeb.StatsControllerTest do
       {:ok, zip} = :zip.unzip(response, [:memory])
 
       {_filename, result} =
-        Enum.find(zip, fn {filename, _data} -> filename == 'custom_props.csv' end)
+        Enum.find(zip, fn {filename, _data} -> filename == ~c"custom_props.csv" end)
 
       assert parse_csv(result) == [
                ["property", "value", "visitors", "events", "percentage"],
@@ -209,7 +267,7 @@ defmodule PlausibleWeb.StatsControllerTest do
       {:ok, zip} = :zip.unzip(response, [:memory])
 
       {_filename, visitors} =
-        Enum.find(zip, fn {filename, _data} -> filename == 'visitors.csv' end)
+        Enum.find(zip, fn {filename, _data} -> filename == ~c"visitors.csv" end)
 
       assert parse_csv(visitors) == [
                [
@@ -291,7 +349,7 @@ defmodule PlausibleWeb.StatsControllerTest do
       {:ok, zip} = :zip.unzip(response(conn, 200), [:memory])
 
       {_filename, result} =
-        Enum.find(zip, fn {filename, _data} -> filename == 'custom_props.csv' end)
+        Enum.find(zip, fn {filename, _data} -> filename == ~c"custom_props.csv" end)
 
       assert parse_csv(result) == [
                ["property", "value", "visitors", "events", "percentage"],
@@ -353,13 +411,15 @@ defmodule PlausibleWeb.StatsControllerTest do
         utm_term: "term",
         timestamp:
           Timex.shift(~N[2021-10-20 12:00:00], days: -1) |> NaiveDateTime.truncate(:second),
-        browser: "ABrowserName"
+        browser: "Firefox",
+        browser_version: "120"
       ),
       build(:pageview,
         timestamp:
           Timex.shift(~N[2021-10-20 12:00:00], months: -1) |> NaiveDateTime.truncate(:second),
         country_code: "EE",
-        browser: "ABrowserName"
+        browser: "Firefox",
+        browser_version: "120"
       ),
       build(:pageview,
         timestamp:
@@ -367,7 +427,7 @@ defmodule PlausibleWeb.StatsControllerTest do
         utm_campaign: "ads",
         country_code: "EE",
         referrer_source: "Google",
-        browser: "ABrowserName"
+        browser: "FirefoxNoVersion"
       ),
       build(:event,
         timestamp:
@@ -410,7 +470,7 @@ defmodule PlausibleWeb.StatsControllerTest do
       {:ok, zip} = :zip.unzip(response(conn, 200), [:memory])
 
       {_filename, result} =
-        Enum.find(zip, fn {filename, _data} -> filename == 'custom_props.csv' end)
+        Enum.find(zip, fn {filename, _data} -> filename == ~c"custom_props.csv" end)
 
       assert parse_csv(result) == [
                ["property", "value", "visitors", "events", "conversion_rate"],
@@ -532,7 +592,10 @@ defmodule PlausibleWeb.StatsControllerTest do
         insert(:shared_link, site: site, password_hash: Plausible.Auth.Password.hash("password"))
 
       link2 =
-        insert(:shared_link, site: site2, password_hash: Plausible.Auth.Password.hash("password1"))
+        insert(:shared_link,
+          site: site2,
+          password_hash: Plausible.Auth.Password.hash("password1")
+        )
 
       conn = post(conn, "/share/#{link.slug}/authenticate", %{password: "password"})
       assert redirected_to(conn, 302) == "/share/#{site.domain}?auth=#{link.slug}"

@@ -1,4 +1,6 @@
 defmodule PlausibleWeb.StatsController do
+  use Plausible
+
   @moduledoc """
   This controller is responsible for rendering stats dashboards.
 
@@ -49,22 +51,23 @@ defmodule PlausibleWeb.StatsController do
   plug(PlausibleWeb.AuthorizeSiteAccess when action in [:stats, :csv_export])
 
   def stats(%{assigns: %{site: site}} = conn, _params) do
+    site = Plausible.Repo.preload(site, :owner)
     stats_start_date = Plausible.Sites.stats_start_date(site)
     can_see_stats? = not Sites.locked?(site) or conn.assigns[:current_user_role] == :super_admin
+    demo = site.domain == PlausibleWeb.Endpoint.host()
+    dogfood_page_path = if !demo, do: "/:dashboard"
 
     cond do
       stats_start_date && can_see_stats? ->
-        demo = site.domain == PlausibleWeb.Endpoint.host()
         offer_email_report = get_session(conn, site.domain <> "_offer_email_report")
 
         conn
-        |> assign(:skip_plausible_tracking, !demo)
         |> remove_email_report_banner(site)
         |> put_resp_header("x-robots-tag", "noindex, nofollow")
         |> render("stats.html",
           site: site,
           has_goals: Plausible.Sites.has_goals?(site),
-          funnels: Plausible.Funnels.list(site),
+          funnels: list_funnels(site),
           has_props: Plausible.Props.configured?(site),
           stats_start_date: stats_start_date,
           native_stats_start_date: NaiveDateTime.to_date(site.native_stats_start_at),
@@ -72,20 +75,30 @@ defmodule PlausibleWeb.StatsController do
           offer_email_report: offer_email_report,
           demo: demo,
           flags: get_flags(conn.assigns[:current_user]),
-          is_dbip: is_dbip()
+          is_dbip: is_dbip(),
+          dogfood_page_path: dogfood_page_path,
+          load_dashboard_js: true
         )
 
       !stats_start_date && can_see_stats? ->
-        conn
-        |> assign(:skip_plausible_tracking, true)
-        |> render("waiting_first_pageview.html", site: site)
+        render(conn, "waiting_first_pageview.html",
+          site: site,
+          dogfood_page_path: dogfood_page_path
+        )
 
       Sites.locked?(site) ->
-        owner = Sites.owner_for(site)
+        site = Plausible.Repo.preload(site, :owner)
+        render(conn, "site_locked.html", site: site, dogfood_page_path: dogfood_page_path)
+    end
+  end
 
-        conn
-        |> assign(:skip_plausible_tracking, true)
-        |> render("site_locked.html", owner: owner, site: site)
+  on_full_build do
+    defp list_funnels(site) do
+      Plausible.Funnels.list(site)
+    end
+  else
+    defp list_funnels(_site) do
+      []
     end
   end
 
@@ -96,7 +109,7 @@ defmodule PlausibleWeb.StatsController do
   """
   def csv_export(conn, params) do
     if is_nil(params["interval"]) or Plausible.Stats.Interval.valid?(params["interval"]) do
-      site = conn.assigns[:site]
+      site = Plausible.Repo.preload(conn.assigns.site, :owner)
       query = Query.from(site, params) |> Filters.add_prefix()
 
       metrics =
@@ -123,40 +136,32 @@ defmodule PlausibleWeb.StatsController do
         |> Enum.join()
 
       filename =
-        'Plausible export #{params["domain"]} #{Timex.format!(query.date_range.first, "{ISOdate} ")} to #{Timex.format!(query.date_range.last, "{ISOdate} ")}.zip'
+        ~c"Plausible export #{params["domain"]} #{Timex.format!(query.date_range.first, "{ISOdate} ")} to #{Timex.format!(query.date_range.last, "{ISOdate} ")}.zip"
 
       params = Map.merge(params, %{"limit" => "300", "csv" => "True", "detailed" => "True"})
       limited_params = Map.merge(params, %{"limit" => "100"})
 
       csvs = %{
-        'sources.csv' => fn -> Api.StatsController.sources(conn, params) end,
-        'utm_mediums.csv' => fn -> Api.StatsController.utm_mediums(conn, params) end,
-        'utm_sources.csv' => fn -> Api.StatsController.utm_sources(conn, params) end,
-        'utm_campaigns.csv' => fn -> Api.StatsController.utm_campaigns(conn, params) end,
-        'utm_contents.csv' => fn -> Api.StatsController.utm_contents(conn, params) end,
-        'utm_terms.csv' => fn -> Api.StatsController.utm_terms(conn, params) end,
-        'pages.csv' => fn -> Api.StatsController.pages(conn, limited_params) end,
-        'entry_pages.csv' => fn -> Api.StatsController.entry_pages(conn, params) end,
-        'exit_pages.csv' => fn -> Api.StatsController.exit_pages(conn, limited_params) end,
-        'countries.csv' => fn -> Api.StatsController.countries(conn, params) end,
-        'regions.csv' => fn -> Api.StatsController.regions(conn, params) end,
-        'cities.csv' => fn -> Api.StatsController.cities(conn, params) end,
-        'browsers.csv' => fn -> Api.StatsController.browsers(conn, params) end,
-        'operating_systems.csv' => fn -> Api.StatsController.operating_systems(conn, params) end,
-        'devices.csv' => fn -> Api.StatsController.screen_sizes(conn, params) end,
-        'conversions.csv' => fn -> Api.StatsController.conversions(conn, params) end,
-        'prop_breakdown.csv' => fn -> Api.StatsController.all_props_breakdown(conn, params) end,
-        'referrers.csv' => fn -> Api.StatsController.referrers(conn, params) end
+        ~c"sources.csv" => fn -> Api.StatsController.sources(conn, params) end,
+        ~c"utm_mediums.csv" => fn -> Api.StatsController.utm_mediums(conn, params) end,
+        ~c"utm_sources.csv" => fn -> Api.StatsController.utm_sources(conn, params) end,
+        ~c"utm_campaigns.csv" => fn -> Api.StatsController.utm_campaigns(conn, params) end,
+        ~c"utm_contents.csv" => fn -> Api.StatsController.utm_contents(conn, params) end,
+        ~c"utm_terms.csv" => fn -> Api.StatsController.utm_terms(conn, params) end,
+        ~c"pages.csv" => fn -> Api.StatsController.pages(conn, limited_params) end,
+        ~c"entry_pages.csv" => fn -> Api.StatsController.entry_pages(conn, params) end,
+        ~c"exit_pages.csv" => fn -> Api.StatsController.exit_pages(conn, limited_params) end,
+        ~c"countries.csv" => fn -> Api.StatsController.countries(conn, params) end,
+        ~c"regions.csv" => fn -> Api.StatsController.regions(conn, params) end,
+        ~c"cities.csv" => fn -> Api.StatsController.cities(conn, params) end,
+        ~c"browsers.csv" => fn -> Api.StatsController.browsers(conn, params) end,
+        ~c"browser_versions.csv" => fn -> Api.StatsController.browser_versions(conn, params) end,
+        ~c"operating_systems.csv" => fn -> Api.StatsController.operating_systems(conn, params) end,
+        ~c"devices.csv" => fn -> Api.StatsController.screen_sizes(conn, params) end,
+        ~c"conversions.csv" => fn -> Api.StatsController.conversions(conn, params) end,
+        ~c"referrers.csv" => fn -> Api.StatsController.referrers(conn, params) end,
+        ~c"custom_props.csv" => fn -> Api.StatsController.all_custom_prop_values(conn, params) end
       }
-
-      csvs =
-        if FunWithFlags.enabled?(:props, for: conn.assigns[:current_user]) do
-          Map.put(csvs, 'custom_props.csv', fn ->
-            Api.StatsController.all_custom_prop_values(conn, params)
-          end)
-        else
-          csvs
-        end
 
       csv_values =
         Map.values(csvs)
@@ -165,8 +170,9 @@ defmodule PlausibleWeb.StatsController do
       csvs =
         Map.keys(csvs)
         |> Enum.zip(csv_values)
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
-      csvs = [{'visitors.csv', visitors} | csvs]
+      csvs = [{~c"visitors.csv", visitors} | csvs]
 
       {:ok, {_, zip_content}} = :zip.create(filename, csvs, [:memory])
 
@@ -243,10 +249,10 @@ defmodule PlausibleWeb.StatsController do
     else
       _e ->
         conn
-        |> assign(:skip_plausible_tracking, true)
         |> render("shared_link_password.html",
           link: shared_link,
-          layout: {PlausibleWeb.LayoutView, "focus.html"}
+          layout: {PlausibleWeb.LayoutView, "focus.html"},
+          dogfood_page_path: "/share/:dashboard"
         )
     end
   end
@@ -287,11 +293,11 @@ defmodule PlausibleWeb.StatsController do
         |> redirect(to: "/share/#{URI.encode_www_form(shared_link.site.domain)}?auth=#{slug}")
       else
         conn
-        |> assign(:skip_plausible_tracking, true)
         |> render("shared_link_password.html",
           link: shared_link,
           error: "Incorrect password. Please try again.",
-          layout: {PlausibleWeb.LayoutView, "focus.html"}
+          layout: {PlausibleWeb.LayoutView, "focus.html"},
+          dogfood_page_path: "/share/:dashboard"
         )
       end
     else
@@ -302,35 +308,39 @@ defmodule PlausibleWeb.StatsController do
   defp render_shared_link(conn, shared_link) do
     cond do
       !shared_link.site.locked ->
+        shared_link = Plausible.Repo.preload(shared_link, site: :owner)
+
         conn
-        |> assign(:skip_plausible_tracking, true)
         |> put_resp_header("x-robots-tag", "noindex, nofollow")
         |> delete_resp_header("x-frame-options")
         |> render("stats.html",
           site: shared_link.site,
           has_goals: Sites.has_goals?(shared_link.site),
-          funnels: Plausible.Funnels.list(shared_link.site),
+          funnels: list_funnels(shared_link.site),
           has_props: Plausible.Props.configured?(shared_link.site),
           stats_start_date: shared_link.site.stats_start_date,
           native_stats_start_date: NaiveDateTime.to_date(shared_link.site.native_stats_start_at),
           title: title(conn, shared_link.site),
           offer_email_report: false,
           demo: false,
-          skip_plausible_tracking: true,
+          dogfood_page_path: "/share/:dashboard",
           shared_link_auth: shared_link.slug,
           embedded: conn.params["embed"] == "true",
           background: conn.params["background"],
           theme: conn.params["theme"],
           flags: get_flags(conn.assigns[:current_user]),
-          is_dbip: is_dbip()
+          is_dbip: is_dbip(),
+          load_dashboard_js: true
         )
 
       Sites.locked?(shared_link.site) ->
-        owner = Sites.owner_for(shared_link.site)
+        owner = Plausible.Repo.preload(shared_link.site, :owner)
 
-        conn
-        |> assign(:skip_plausible_tracking, true)
-        |> render("site_locked.html", owner: owner, site: shared_link.site)
+        render(conn, "site_locked.html",
+          owner: owner,
+          site: shared_link.site,
+          dogfood_page_path: "/share/:dashboard"
+        )
     end
   end
 
@@ -344,22 +354,18 @@ defmodule PlausibleWeb.StatsController do
 
   defp shared_link_cookie_name(slug), do: "shared-link-" <> slug
 
-  defp get_flags(user) do
-    %{
-      funnels: Plausible.Funnels.enabled_for?(user),
-      props: FunWithFlags.enabled?(:props, for: user)
-    }
+  defp get_flags(_user) do
+    %{}
   end
 
   defp is_dbip() do
-    is_or_nil =
-      if Application.get_env(:plausible, :is_selfhost) do
-        if type = Plausible.Geo.database_type() do
-          String.starts_with?(type, "DBIP")
-        end
-      end
-
-    !!is_or_nil
+    on_full_build do
+      false
+    else
+      Plausible.Geo.database_type()
+      |> to_string()
+      |> String.starts_with?("DBIP")
+    end
   end
 
   defp title(%{path_info: ["plausible.io"]}, _) do

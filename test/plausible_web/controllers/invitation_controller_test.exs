@@ -1,5 +1,5 @@
 defmodule PlausibleWeb.Site.InvitationControllerTest do
-  use PlausibleWeb.ConnCase
+  use PlausibleWeb.ConnCase, async: true
   use Plausible.Repo
   use Bamboo.Test
 
@@ -22,7 +22,7 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :success) ==
                "You now have access to #{site.domain}"
 
-      assert redirected_to(conn) == "/#{site.domain}"
+      assert redirected_to(conn) == "/#{URI.encode_www_form(site.domain)}"
 
       refute Repo.exists?(from(i in Plausible.Auth.Invitation, where: i.email == ^user.email))
 
@@ -42,7 +42,7 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
         )
 
       c1 = post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
-      assert redirected_to(c1) == "/#{site.domain}"
+      assert redirected_to(c1) == "/#{URI.encode_www_form(site.domain)}"
 
       assert Phoenix.Flash.get(c1.assigns.flash, :success) ==
                "You now have access to #{site.domain}"
@@ -53,51 +53,24 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
       assert Phoenix.Flash.get(c2.assigns.flash, :error) ==
                "Invitation missing or already accepted"
     end
-
-    test "notifies the original inviter", %{conn: conn, user: user} do
-      inviter = insert(:user)
-      site = insert(:site)
-
-      invitation =
-        insert(:invitation, site_id: site.id, inviter: inviter, email: user.email, role: :admin)
-
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
-
-      assert_email_delivered_with(
-        to: [nil: inviter.email],
-        subject: "[Plausible Analytics] #{user.email} accepted your invitation to #{site.domain}"
-      )
-    end
   end
 
   describe "POST /sites/invitations/:invitation_id/accept - ownership transfer" do
-    test "notifies the original inviter with a different email", %{
-      conn: conn,
-      user: user
-    } do
-      inviter = insert(:user)
-      site = insert(:site)
-
-      invitation =
-        insert(:invitation, site_id: site.id, inviter: inviter, email: user.email, role: :owner)
-
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
-
-      assert_email_delivered_with(
-        to: [nil: inviter.email],
-        subject:
-          "[Plausible Analytics] #{user.email} accepted the ownership transfer of #{site.domain}"
-      )
-    end
-
     test "downgrades previous owner to admin", %{conn: conn, user: user} do
       old_owner = insert(:user)
       site = insert(:site, members: [old_owner])
 
+      insert(:growth_subscription, user: user)
+
       invitation =
         insert(:invitation, site_id: site.id, inviter: old_owner, email: user.email, role: :owner)
 
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
+      conn = post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
+
+      assert redirected_to(conn, 302) == "/#{URI.encode_www_form(site.domain)}"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :success) =~
+               "You now have access to"
 
       refute Repo.exists?(from(i in Plausible.Auth.Invitation, where: i.email == ^user.email))
 
@@ -112,115 +85,46 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
       assert new_owner_membership.role == :owner
     end
 
-    test "will lock the site if new owner does not have an active subscription or trial",
-         %{
-           conn: conn,
-           user: user
-         } do
-      Repo.update_all(from(u in Plausible.Auth.User, where: u.id == ^user.id),
-        set: [trial_expiry_date: Timex.today() |> Timex.shift(days: -1)]
-      )
-
-      inviter = insert(:user)
-      site = insert(:site, locked: false)
-
-      invitation =
-        insert(:invitation, site_id: site.id, inviter: inviter, email: user.email, role: :owner)
-
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
-
-      assert Repo.reload!(site).locked
-    end
-
-    test "will end the trial of the new owner immediately", %{
-      conn: conn,
-      user: user
-    } do
-      Repo.update_all(from(u in Plausible.Auth.User, where: u.id == ^user.id),
-        set: [trial_expiry_date: Timex.today() |> Timex.shift(days: 7)]
-      )
-
-      inviter = insert(:user)
-      site = insert(:site, locked: false)
-
-      invitation =
-        insert(:invitation, site_id: site.id, inviter: inviter, email: user.email, role: :owner)
-
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
-
-      assert Timex.before?(Repo.reload!(user).trial_expiry_date, Timex.today())
-      assert Repo.reload!(site).locked
-    end
-
-    test "if new owner does not have a trial - will set trial_expiry_date to yesterday",
-         %{
-           conn: conn,
-           user: user
-         } do
-      Repo.update_all(from(u in Plausible.Auth.User, where: u.id == ^user.id),
-        set: [trial_expiry_date: nil]
-      )
-
-      inviter = insert(:user)
-      site = insert(:site, locked: false)
-
-      invitation =
-        insert(:invitation, site_id: site.id, inviter: inviter, email: user.email, role: :owner)
-
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
-
-      assert Timex.before?(Repo.reload!(user).trial_expiry_date, Timex.today())
-      assert Repo.reload!(site).locked
-    end
-
-    test "can upgrade admin to owner", %{conn: conn, user: user} do
+    @tag :full_build_only
+    test "fails when new owner has no plan", %{conn: conn, user: user} do
       old_owner = insert(:user)
       site = insert(:site, members: [old_owner])
-      insert(:site_membership, site: site, user: user, role: :admin)
 
       invitation =
         insert(:invitation, site_id: site.id, inviter: old_owner, email: user.email, role: :owner)
 
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
+      conn = post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
 
-      refute Repo.exists?(from(i in Plausible.Auth.Invitation, where: i.email == ^user.email))
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
 
-      new_owner_membership =
-        Repo.get_by(Plausible.Site.Membership, user_id: user.id, site_id: site.id)
-
-      assert new_owner_membership.role == :owner
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "No existing subscription"
     end
 
-    test "works in self-hosted", %{conn: conn, user: user} do
-      patch_env(:is_selfhost, true)
-
+    @tag :full_build_only
+    test "fails when new owner's plan is unsuitable", %{conn: conn, user: user} do
       old_owner = insert(:user)
       site = insert(:site, members: [old_owner])
 
+      insert(:growth_subscription, user: user)
+
+      # fill site limit quota
+      insert_list(10, :site, members: [user])
+
       invitation =
-        insert(:invitation,
-          site_id: site.id,
-          inviter: old_owner,
-          email: user.email,
-          role: :owner
-        )
+        insert(:invitation, site_id: site.id, inviter: old_owner, email: user.email, role: :owner)
 
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
+      conn = post(conn, "/sites/invitations/#{invitation.invitation_id}/accept")
 
-      old_owner_membership =
-        Repo.get_by(Plausible.Site.Membership, user_id: old_owner.id, site_id: site.id)
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
 
-      assert old_owner_membership.role == :admin
-
-      new_owner_membership =
-        Repo.get_by(Plausible.Site.Membership, user_id: user.id, site_id: site.id)
-
-      assert new_owner_membership.role == :owner
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Plan limits exceeded: site limit."
     end
   end
 
   describe "POST /sites/invitations/:invitation_id/reject" do
-    test "deletes the invitation", %{conn: conn, user: user} do
+    test "rejects the invitation", %{conn: conn, user: user} do
       site = insert(:site)
 
       invitation =
@@ -231,24 +135,20 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
           role: :admin
         )
 
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/reject")
+      conn = post(conn, "/sites/invitations/#{invitation.invitation_id}/reject")
 
-      refute Repo.exists?(from(i in Plausible.Auth.Invitation, where: i.email == ^user.email))
+      assert redirected_to(conn, 302) == "/sites"
+
+      refute Repo.reload(invitation)
     end
 
-    test "notifies the original inviter", %{conn: conn, user: user} do
-      inviter = insert(:user)
-      site = insert(:site)
+    test "renders error for non-existent invitation", %{conn: conn} do
+      conn = post(conn, "/sites/invitations/does-not-exist/reject")
 
-      invitation =
-        insert(:invitation, site_id: site.id, inviter: inviter, email: user.email, role: :admin)
+      assert redirected_to(conn, 302) == "/sites"
 
-      post(conn, "/sites/invitations/#{invitation.invitation_id}/reject")
-
-      assert_email_delivered_with(
-        to: [nil: inviter.email],
-        subject: "[Plausible Analytics] #{user.email} rejected your invitation to #{site.domain}"
-      )
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Invitation missing or already accepted"
     end
   end
 
@@ -264,14 +164,15 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
           role: :admin
         )
 
-      delete(
-        conn,
-        Routes.invitation_path(conn, :remove_invitation, site.domain, invitation.invitation_id)
-      )
+      conn =
+        delete(
+          conn,
+          Routes.invitation_path(conn, :remove_invitation, site.domain, invitation.invitation_id)
+        )
 
-      refute Repo.exists?(
-               from i in Plausible.Auth.Invitation, where: i.email == "jane@example.com"
-             )
+      assert redirected_to(conn, 302) == "/#{URI.encode_www_form(site.domain)}/settings/people"
+
+      refute Repo.reload(invitation)
     end
 
     test "fails to remove an invitation with insufficient permission", %{conn: conn, user: user} do
@@ -290,18 +191,16 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
         Routes.invitation_path(conn, :remove_invitation, site.domain, invitation.invitation_id)
       )
 
-      assert Repo.exists?(
-               from i in Plausible.Auth.Invitation, where: i.email == "jane@example.com"
-             )
+      assert Repo.reload(invitation)
     end
 
     test "fails to remove an invitation from the outside", %{conn: my_conn, user: me} do
-      my_site = insert(:site)
-      insert(:site_membership, site: my_site, user: me, role: "owner")
+      _my_site = insert(:site, memberships: [build(:site_membership, user: me, role: "owner")])
 
       other_user = insert(:user)
-      other_site = insert(:site)
-      insert(:site_membership, site: other_site, user: other_user, role: "owner")
+
+      other_site =
+        insert(:site, memberships: [build(:site_membership, user: other_user, role: "owner")])
 
       invitation =
         insert(:invitation,
@@ -321,9 +220,26 @@ defmodule PlausibleWeb.Site.InvitationControllerTest do
 
       delete(my_conn, remove_invitation_path)
 
-      assert Repo.exists?(
-               from i in Plausible.Auth.Invitation, where: i.email == "jane@example.com"
-             )
+      assert Repo.reload(invitation)
+    end
+
+    test "renders error for non-existent invitation", %{conn: conn, user: user} do
+      site = insert(:site, memberships: [build(:site_membership, user: user, role: :admin)])
+
+      remove_invitation_path =
+        Routes.invitation_path(
+          conn,
+          :remove_invitation,
+          site.domain,
+          "does_not_exist"
+        )
+
+      conn = delete(conn, remove_invitation_path)
+
+      assert redirected_to(conn, 302) == "/#{URI.encode_www_form(site.domain)}/settings/people"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Invitation missing or already removed"
     end
   end
 end

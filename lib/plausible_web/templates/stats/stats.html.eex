@@ -18,9 +18,11 @@
     data-domain="<%= @site.domain %>"
     data-offset="<%= Plausible.Site.tz_offset(@site) %>"
     data-has-goals="<%= @has_goals %>"
-    data-conversions-enabled="<%= @site.conversions_enabled %>"
-    data-funnels-enabled="<%= @site.funnels_enabled %>"
-    data-props-enabled="<%= @site.props_enabled %>"
+    data-conversions-opted-out="<%= Plausible.Billing.Feature.Goals.opted_out?(@site) %>"
+    data-funnels-opted-out="<%= Plausible.Billing.Feature.Funnels.opted_out?(@site) %>"
+    data-props-opted-out="<%= Plausible.Billing.Feature.Props.opted_out?(@site) %>"
+    data-funnels-available="<%= Plausible.Billing.Feature.Funnels.check_availability(@site.owner) == :ok %>"
+    data-props-available="<%= Plausible.Billing.Feature.Props.check_availability(@site.owner) == :ok %>"
     data-funnels="<%= Jason.encode!(@funnels) %>"
     data-has-props="<%= @has_props %>"
     data-logged-in="<%= !!@conn.assigns[:current_user] %>"
@@ -58,5 +60,4 @@
       </div>
     </div>
   <% end %>
-  <script type="text/javascript" src="<%= Routes.static_path(@conn, "/js/dashboard.js") %>"></script>
 </div>

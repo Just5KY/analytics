@@ -50,18 +50,11 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
       li1 = doc |> find(suggestion_li(1)) |> List.first()
       li2 = doc |> find(suggestion_li(2)) |> List.first()
 
-      assert text_of_attr(li1, "@mouseenter") == "setFocus(0)"
-      assert text_of_attr(li2, "@mouseenter") == "setFocus(1)"
+      assert text_of_attr(li1, "@mouseenter") == "setFocus(1)"
+      assert text_of_attr(li2, "@mouseenter") == "setFocus(2)"
 
-      assert text_of_attr(li1, "x-bind:class") =~ "focus === 0"
-      assert text_of_attr(li2, "x-bind:class") =~ "focus === 1"
-    end
-
-    test "Alpine.js: component refers to window.suggestionsDropdown" do
-      assert new_options(2)
-             |> render_sample_component()
-             |> find("div#input-picker-main-test-component")
-             |> text_of_attr("x-data") =~ "window.suggestionsDropdown('test-component')"
+      assert text_of_attr(li1, "x-bind:class") =~ "focus === 1"
+      assert text_of_attr(li2, "x-bind:class") =~ "focus === 2"
     end
 
     test "Alpine.js: component sets up keyboard navigation" do
@@ -113,14 +106,23 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
           display_value: "Brazilian Real"
         )
 
-      assert text_of_element(doc, "#dropdown-test-component-option-0") == "US Dollar"
-      assert text_of_element(doc, "#dropdown-test-component-option-1") == "Euro"
-
-      assert text_of_element(doc, "#dropdown-test-component-option-2") ==
+      assert text_of_element(doc, "#dropdown-test-component-option-0") ==
                ~s(Create "Brazilian Real")
+
+      assert text_of_element(doc, "#dropdown-test-component-option-1") == "US Dollar"
+      assert text_of_element(doc, "#dropdown-test-component-option-2") == "Euro"
 
       refute text_of_element(doc, "#dropdown-test-component") ==
                "No matches found. Try searching for something different."
+    end
+
+    test "when no options available, hints the user to create one by typing" do
+      doc =
+        render_sample_component([],
+          creatable: true
+        )
+
+      assert text_of_element(doc, "#dropdown-test-component div") == "Create an item by typing."
     end
 
     test "makes the html input required when required option is passed" do
@@ -154,7 +156,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
         <.live_component
           submit_name="some_submit_name"
           module={PlausibleWeb.Live.Components.ComboBox}
-          suggest_mod={__MODULE__.SampleSuggest}
+          suggest_fun={&SampleSuggest.suggest/2}
           id="test-component"
           options={for i <- 1..20, do: {i, "Option #{i}"}}
           suggestions_limit={7}
@@ -166,7 +168,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
     test "uses the suggestions module", %{conn: conn} do
       {:ok, lv, _html} = live_isolated(conn, SampleView, session: %{})
       doc = type_into_combo(lv, "test-component", "Echo me")
-      assert text_of_element(doc, "#dropdown-test-component-option-0") == "Echo me"
+      assert text_of_element(doc, "#dropdown-test-component-option-1") == "Echo me"
     end
 
     test "stores selected value", %{conn: conn} do
@@ -175,7 +177,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
 
       doc =
         lv
-        |> element("li#dropdown-test-component-option-0 a")
+        |> element("li#dropdown-test-component-option-1 a")
         |> render_click()
 
       assert element_exists?(doc, "input[type=hidden][name=some_submit_name][value=20]")
@@ -210,7 +212,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
         <.live_component
           submit_name="some_submit_name"
           module={PlausibleWeb.Live.Components.ComboBox}
-          suggest_mod={ComboBox.StaticSearch}
+          suggest_fun={&ComboBox.StaticSearch.suggest/2}
           id="test-creatable-component"
           options={for i <- 1..20, do: {i, "Option #{i}"}}
           creatable
@@ -225,7 +227,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
 
       doc =
         lv
-        |> element("li#dropdown-test-creatable-component-option-0 a")
+        |> element("li#dropdown-test-creatable-component-option-1 a")
         |> render_click()
 
       assert element_exists?(doc, "input[type=hidden][name=some_submit_name][value=20]")
@@ -245,7 +247,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
 
       assert lv
              |> type_into_combo("test-creatable-component", "Option 1")
-             |> text_of_element("li#dropdown-test-creatable-component-option-0 a") == ~s(Option 1)
+             |> text_of_element("li#dropdown-test-creatable-component-option-1 a") == ~s(Option 1)
     end
 
     test "stores new value by clicking on the dropdown custom option", %{conn: conn} do
@@ -272,6 +274,86 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
                "input[type=hidden][name=some_submit_name][value=\"my new option\"]"
              )
     end
+
+    test "selectionInProgress doesn't apply when no server roundtrip is needed", %{conn: conn} do
+      {:ok, lv, html} = live_isolated(conn, CreatableView, session: %{})
+      regular_option = find(html, "li#dropdown-test-creatable-component-option-1 a")
+
+      assert Floki.attribute(regular_option, "x-on:click") == ["selectionInProgress = true"]
+
+      creatable_option =
+        lv
+        |> type_into_combo("test-creatable-component", "my new option")
+        |> find("input[type=hidden][name=some_submit_name][value=\"my new option\"]")
+
+      assert Floki.attribute(creatable_option, "x-on:click") == []
+    end
+  end
+
+  describe "async suggestions" do
+    defmodule SampleViewAsync do
+      use Phoenix.LiveView
+
+      defmodule SampleSuggest do
+        def suggest("", []) do
+          :timer.sleep(500)
+          [{1, "One"}, {2, "Two"}, {3, "Three"}]
+        end
+
+        def suggest("Echo me", _options) do
+          :timer.sleep(500)
+          [{1, "Echo me"}]
+        end
+      end
+
+      def render(assigns) do
+        ~H"""
+        <.live_component
+          submit_name="some_submit_name"
+          module={PlausibleWeb.Live.Components.ComboBox}
+          suggest_fun={&SampleSuggest.suggest/2}
+          id="test-component"
+          async={true}
+          suggestions_limit={7}
+        />
+        """
+      end
+    end
+
+    test "options are empty at immediate render" do
+      doc =
+        render_component(
+          ComboBox,
+          submit_name: "test-submit-name",
+          id: "test-component",
+          suggest_fun: &ComboBox.StaticSearch.suggest/2,
+          async: true
+        )
+
+      refute element_exists?(doc, "#dropdown-test-component-option-1")
+    end
+
+    @tag :slow
+    test "pre-fills the suggestions asynchronously", %{conn: conn} do
+      {:ok, lv, doc} = live_isolated(conn, SampleViewAsync, session: %{})
+      refute element_exists?(doc, "#dropdown-test-component-option-1")
+      :timer.sleep(1000)
+      doc = render(lv)
+      assert text_of_element(doc, "#dropdown-test-component-option-1") == "One"
+      assert text_of_element(doc, "#dropdown-test-component-option-2") == "Two"
+      assert text_of_element(doc, "#dropdown-test-component-option-3") == "Three"
+    end
+
+    @tag :slow
+    test "uses the suggestions function asynchronously", %{conn: conn} do
+      {:ok, lv, _html} = live_isolated(conn, SampleViewAsync, session: %{})
+      doc = type_into_combo(lv, "test-component", "Echo me")
+      refute element_exists?(doc, "#dropdown-test-component-option-1")
+      :timer.sleep(1000)
+      doc = render(lv)
+      assert element_exists?(doc, "#dropdown-test-component-option-1")
+      assert text_of_element(doc, "#dropdown-test-component-option-1") == "Echo me"
+    end
   end
 
   defp render_sample_component(options, extra_opts \\ []) do
@@ -282,7 +364,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
           options: options,
           submit_name: "test-submit-name",
           id: "test-component",
-          suggest_mod: ComboBox.StaticSearch
+          suggest_fun: &ComboBox.StaticSearch.suggest/2
         ],
         extra_opts
       )
@@ -294,7 +376,7 @@ defmodule PlausibleWeb.Live.Components.ComboBoxTest do
   end
 
   defp suggestion_li(idx) do
-    ~s/#{@ul} li#dropdown-test-component-option-#{idx - 1}/
+    ~s/#{@ul} li#dropdown-test-component-option-#{idx}/
   end
 
   defp type_into_combo(lv, id, text) do

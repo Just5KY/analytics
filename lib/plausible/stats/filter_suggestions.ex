@@ -1,6 +1,7 @@
 defmodule Plausible.Stats.FilterSuggestions do
   use Plausible.Repo
   use Plausible.ClickhouseRepo
+  use Plausible.Stats.Fragments
   import Plausible.Stats.Base
   alias Plausible.Stats.Query
 
@@ -142,7 +143,7 @@ defmodule Plausible.Stats.FilterSuggestions do
       order_by: [desc: fragment("count(*)")],
       limit: 25
     )
-    |> Plausible.Stats.CustomProps.maybe_allowed_props_only(site.allowed_event_props)
+    |> Plausible.Stats.CustomProps.maybe_allowed_props_only(site)
     |> ClickhouseRepo.all()
     |> wrap_suggestions()
   end
@@ -154,20 +155,22 @@ defmodule Plausible.Stats.FilterSuggestions do
 
     none_q =
       from(e in base_event_query(site, Query.remove_event_filters(query, [:props])),
-        left_array_join: meta in "meta",
-        as: :meta,
         select: "(none)",
-        where: fragment("not has(?, ?)", field(e, :"meta.key"), ^key),
+        where: not has_key(e, :meta, ^key),
         limit: 1
       )
 
     search_q =
       from(e in base_event_query(site, query),
-        array_join: meta in "meta",
-        as: :meta,
-        select: meta.value,
-        where: meta.key == ^key and fragment("? ilike ?", meta.value, ^filter_query),
-        group_by: meta.value,
+        select: get_by_key(e, :meta, ^key),
+        where:
+          has_key(e, :meta, ^key) and
+            fragment(
+              "? ilike ?",
+              get_by_key(e, :meta, ^key),
+              ^filter_query
+            ),
+        group_by: get_by_key(e, :meta, ^key),
         order_by: [desc: fragment("count(*)")],
         limit: 25
       )
@@ -187,109 +190,122 @@ defmodule Plausible.Stats.FilterSuggestions do
 
     filter_name =
       case filter_name do
-        "page" -> "pathname"
-        "source" -> "referrer_source"
-        "os" -> "operating_system"
-        "os_version" -> "operating_system_version"
-        "screen" -> "screen_size"
-        _ -> filter_name
+        "page" -> :pathname
+        "entry_page" -> :entry_page
+        "source" -> :referrer_source
+        "os" -> :operating_system
+        "os_version" -> :operating_system_version
+        "screen" -> :screen_size
+        "exit_page" -> :exit_page
+        "utm_source" -> :utm_source
+        "utm_medium" -> :utm_medium
+        "utm_campaign" -> :utm_campaign
+        "utm_content" -> :utm_content
+        "utm_term" -> :utm_term
+        "referrer" -> :referrer
+        "browser" -> :browser
+        "browser_version" -> :browser_version
+        "operating_system" -> :operating_system
+        "operating_system_version" -> :operating_system_version
+        "screen_size" -> :screen_size
+        _ -> :unknown
       end
 
     q =
-      if(filter_name == "pathname",
+      if(filter_name == :pathname,
         do: base_event_query(site, query),
         else: query_sessions(site, query)
       )
       |> from(
-        group_by: ^String.to_atom(filter_name),
+        group_by: ^filter_name,
         order_by: [desc: fragment("count(*)")],
         limit: 25
       )
 
     q =
       case filter_name do
-        "pathname" ->
+        :pathname ->
           from(e in q,
             select: e.pathname,
             where: fragment("? ilike ?", e.pathname, ^filter_query)
           )
 
-        "entry_page" ->
+        :entry_page ->
           from(e in q,
             select: e.entry_page,
             where: fragment("? ilike ?", e.entry_page, ^filter_query)
           )
 
-        "exit_page" ->
+        :exit_page ->
           from(e in q,
             select: e.exit_page,
             where: fragment("? ilike ?", e.exit_page, ^filter_query)
           )
 
-        "referrer_source" ->
+        :referrer_source ->
           from(e in q,
             select: e.referrer_source,
             where: fragment("? ilike ?", e.referrer_source, ^filter_query)
           )
 
-        "utm_medium" ->
+        :utm_medium ->
           from(e in q,
             select: e.utm_medium,
             where: fragment("? ilike ?", e.utm_medium, ^filter_query)
           )
 
-        "utm_source" ->
+        :utm_source ->
           from(e in q,
             select: e.utm_source,
             where: fragment("? ilike ?", e.utm_source, ^filter_query)
           )
 
-        "utm_campaign" ->
+        :utm_campaign ->
           from(e in q,
             select: e.utm_campaign,
             where: fragment("? ilike ?", e.utm_campaign, ^filter_query)
           )
 
-        "utm_content" ->
+        :utm_content ->
           from(e in q,
             select: e.utm_content,
             where: fragment("? ilike ?", e.utm_content, ^filter_query)
           )
 
-        "utm_term" ->
+        :utm_term ->
           from(e in q,
             select: e.utm_term,
             where: fragment("? ilike ?", e.utm_term, ^filter_query)
           )
 
-        "referrer" ->
+        :referrer ->
           from(e in q,
             select: e.referrer,
             where: fragment("? ilike ?", e.referrer, ^filter_query)
           )
 
-        "browser" ->
+        :browser ->
           from(e in q, select: e.browser, where: fragment("? ilike ?", e.browser, ^filter_query))
 
-        "browser_version" ->
+        :browser_version ->
           from(e in q,
             select: e.browser_version,
             where: fragment("? ilike ?", e.browser_version, ^filter_query)
           )
 
-        "operating_system" ->
+        :operating_system ->
           from(e in q,
             select: e.operating_system,
             where: fragment("? ilike ?", e.operating_system, ^filter_query)
           )
 
-        "operating_system_version" ->
+        :operating_system_version ->
           from(e in q,
             select: e.operating_system_version,
             where: fragment("? ilike ?", e.operating_system_version, ^filter_query)
           )
 
-        "screen_size" ->
+        :screen_size ->
           from(e in q,
             select: e.screen_size,
             where: fragment("? ilike ?", e.screen_size, ^filter_query)

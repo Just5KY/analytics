@@ -1,8 +1,9 @@
 defmodule PlausibleWeb.AuthorizeStatsApiPlug do
   import Plug.Conn
   use Plausible.Repo
-  alias Plausible.Auth.ApiKey
+  alias Plausible.Auth
   alias Plausible.Sites
+  alias Plausible.RateLimit
   alias PlausibleWeb.Api.Helpers, as: H
 
   def init(options) do
@@ -11,7 +12,7 @@ defmodule PlausibleWeb.AuthorizeStatsApiPlug do
 
   def call(conn, _opts) do
     with {:ok, token} <- get_bearer_token(conn),
-         {:ok, api_key} <- find_api_key(token),
+         {:ok, api_key} <- Auth.find_api_key(token),
          :ok <- check_api_key_rate_limit(api_key),
          {:ok, site} <- verify_access(api_key, conn.params["site_id"]) do
       Plausible.OpenTelemetry.add_site_attributes(site)
@@ -41,6 +42,12 @@ defmodule PlausibleWeb.AuthorizeStatsApiPlug do
           "Invalid API key or site ID. Please make sure you're using a valid API key with access to the site you've requested."
         )
 
+      {:error, :upgrade_required} ->
+        H.payment_required(
+          conn,
+          "#{Plausible.Billing.Feature.StatsAPI.display_name()} is part of the Plausible Business plan. To get access to this feature, please upgrade your account."
+        )
+
       {:error, :site_locked} ->
         H.payment_required(
           conn,
@@ -61,10 +68,20 @@ defmodule PlausibleWeb.AuthorizeStatsApiPlug do
         is_super_admin? = Plausible.Auth.is_super_admin?(api_key.user_id)
 
         cond do
-          is_super_admin? -> {:ok, site}
-          Sites.locked?(site) -> {:error, :site_locked}
-          is_member? -> {:ok, site}
-          true -> {:error, :invalid_api_key}
+          is_super_admin? ->
+            {:ok, site}
+
+          Sites.locked?(site) ->
+            {:error, :site_locked}
+
+          Plausible.Billing.Feature.StatsAPI.check_availability(api_key.user) !== :ok ->
+            {:error, :upgrade_required}
+
+          is_member? ->
+            {:ok, site}
+
+          true ->
+            {:error, :invalid_api_key}
         end
 
       nil ->
@@ -83,15 +100,13 @@ defmodule PlausibleWeb.AuthorizeStatsApiPlug do
     end
   end
 
-  defp find_api_key(token) do
-    hashed_key = ApiKey.do_hash(token)
-    found_key = Repo.get_by(ApiKey, key_hash: hashed_key)
-    if found_key, do: {:ok, found_key}, else: {:error, :invalid_api_key}
-  end
-
   @one_hour 60 * 60 * 1000
   defp check_api_key_rate_limit(api_key) do
-    case Hammer.check_rate("api_request:#{api_key.id}", @one_hour, api_key.hourly_request_limit) do
+    case RateLimit.check_rate(
+           "api_request:#{api_key.id}",
+           @one_hour,
+           api_key.hourly_request_limit
+         ) do
       {:allow, _} -> :ok
       {:deny, _} -> {:error, :rate_limit, api_key.hourly_request_limit}
     end

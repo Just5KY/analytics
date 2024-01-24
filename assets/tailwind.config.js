@@ -1,20 +1,17 @@
 const colors = require('tailwindcss/colors')
+const plugin = require('tailwindcss/plugin')
 
 module.exports = {
-  purge: {
-    content: [
-      './js/**/*.js',
-      '../lib/plausible_web/templates/**/*.html.eex',
-      '../lib/plausible_web/templates/**/*.html.heex',
-      '../lib/plausible_web/live/**/*.ex',
-      '../lib/plausible_web/components/**/*.ex',
-    ],
-    safelist: [
-      // PlausibleWeb.StatsView.stats_container_class/1 uses this class
-      // it's not used anywhere else in the templates or scripts
-      "max-w-screen-xl"
-    ]
-  },
+  content: [
+    "./js/**/*.js",
+    "../lib/*_web.ex",
+    "../lib/*_web/**/*.*ex"
+  ],
+  safelist: [
+    // PlausibleWeb.StatsView.stats_container_class/1 uses this class
+    // it's not used anywhere else in the templates or scripts
+    "max-w-screen-xl"
+  ],
   darkMode: 'class',
   theme: {
     container: {
@@ -23,7 +20,8 @@ module.exports = {
     },
     extend: {
       colors: {
-        orange: colors.orange,
+        yellow: colors.amber, // We started usign `yellow` in v2 but it was renamed to `amber` in v3 https://tailwindcss.com/docs/upgrade-guide#removed-color-aliases
+        gray: colors.slate,
         'gray-950': 'rgb(13, 18, 30)',
         'gray-850': 'rgb(26, 32, 44)',
         'gray-825': 'rgb(37, 47, 63)'
@@ -32,7 +30,6 @@ module.exports = {
         '44': '11rem'
       },
       width: {
-        '31percent': '31%',
         'content': 'fit-content'
       },
       opacity: {
@@ -50,23 +47,12 @@ module.exports = {
       }
     },
   },
-  variants: {
-    textColor: ['responsive', 'hover', 'focus', 'group-hover'],
-    display: ['responsive', 'hover', 'focus', 'group-hover'],
-    extend: {
-      textColor: ['dark'],
-      borderWidth: ['dark'],
-      backgroundOpacity: ['dark'],
-      display: ['dark'],
-      cursor: ['hover'],
-      justifyContent: ['responsive'],
-      backgroundColor: ['odd', 'even'],
-      shadow: ['dark']
-    }
-  },
   plugins: [
     require('@tailwindcss/forms'),
-    require('@tailwindcss/typography'),
     require('@tailwindcss/aspect-ratio'),
+    plugin(({addVariant}) => addVariant("phx-no-feedback", [".phx-no-feedback&", ".phx-no-feedback &"])),
+    plugin(({addVariant}) => addVariant("phx-click-loading", [".phx-click-loading&", ".phx-click-loading &"])),
+    plugin(({addVariant}) => addVariant("phx-submit-loading", [".phx-submit-loading&", ".phx-submit-loading &"])),
+    plugin(({addVariant}) => addVariant("phx-change-loading", [".phx-change-loading&", ".phx-change-loading &"])),
   ]
 }

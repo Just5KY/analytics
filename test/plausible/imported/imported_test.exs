@@ -6,8 +6,8 @@ defmodule Plausible.ImportedTest do
 
   defp import_data(ga_data, site_id, table_name) do
     ga_data
-    |> Plausible.Imported.from_google_analytics(site_id, table_name)
-    |> then(&Plausible.Google.Buffer.insert_all(table_name, &1))
+    |> Plausible.Imported.UniversalAnalytics.from_report(site_id, table_name)
+    |> then(&Plausible.Imported.Buffer.insert_all(table_name, &1))
   end
 
   describe "Parse and import third party data fetched from Google Analytics" do
@@ -306,12 +306,6 @@ defmodule Plausible.ImportedTest do
                  "name" => "social",
                  "visit_duration" => 20,
                  "visitors" => 3
-               },
-               %{
-                 "bounce_rate" => 100.0,
-                 "name" => "Direct / None",
-                 "visit_duration" => 60.0,
-                 "visitors" => 1
                }
              ]
     end
@@ -395,12 +389,6 @@ defmodule Plausible.ImportedTest do
                  "visitors" => 2,
                  "bounce_rate" => 100.0,
                  "visit_duration" => 50.0
-               },
-               %{
-                 "bounce_rate" => 0.0,
-                 "name" => "Direct / None",
-                 "visit_duration" => 100.0,
-                 "visitors" => 1
                }
              ]
     end
@@ -485,12 +473,6 @@ defmodule Plausible.ImportedTest do
                  "visitors" => 2,
                  "bounce_rate" => 100.0,
                  "visit_duration" => 50.0
-               },
-               %{
-                 "bounce_rate" => 0.0,
-                 "name" => "Direct / None",
-                 "visit_duration" => 100.0,
-                 "visitors" => 1
                }
              ]
     end
@@ -574,12 +556,6 @@ defmodule Plausible.ImportedTest do
                  "visitors" => 2,
                  "bounce_rate" => 100.0,
                  "visit_duration" => 50.0
-               },
-               %{
-                 "bounce_rate" => 0.0,
-                 "name" => "Direct / None",
-                 "visit_duration" => 100.0,
-                 "visitors" => 1
                }
              ]
     end
@@ -1126,7 +1102,7 @@ defmodule Plausible.ImportedTest do
                  %{"name" => "Unique visitors", "value" => 1},
                  %{"name" => "Total visits", "value" => 1},
                  %{"name" => "Total pageviews", "value" => 1},
-                 %{"name" => "Views per visit", "value" => 0.0},
+                 %{"name" => "Views per visit", "value" => +0.0},
                  %{"name" => "Bounce rate", "value" => 0},
                  %{"name" => "Visit duration", "value" => 60}
                ]

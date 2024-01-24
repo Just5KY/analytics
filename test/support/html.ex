@@ -1,4 +1,6 @@
 defmodule Plausible.Test.Support.HTML do
+  Code.ensure_compiled!(Floki)
+
   @moduledoc """
   Floki wrappers to help make assertions about HTML/DOM structures
   """
@@ -29,6 +31,25 @@ defmodule Plausible.Test.Support.HTML do
     |> find(element)
     |> Floki.text()
     |> String.trim()
+    |> String.replace(~r/\s+/, " ")
+  end
+
+  def text(element) do
+    element
+    |> Floki.text()
+    |> String.trim()
+  end
+
+  def class_of_element(html, element) do
+    html
+    |> find(element)
+    |> text_of_attr("class")
+  end
+
+  def text_of_attr(html, element, attr) do
+    html
+    |> find(element)
+    |> text_of_attr(attr)
   end
 
   def text_of_attr(element, attr) do
@@ -36,5 +57,9 @@ defmodule Plausible.Test.Support.HTML do
     |> Floki.attribute(attr)
     |> Floki.text()
     |> String.trim()
+  end
+
+  def name_of(element) do
+    List.first(Floki.attribute(element, "name"))
   end
 end

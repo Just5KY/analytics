@@ -1,4 +1,6 @@
 defmodule Plausible.Stats.Query do
+  use Plausible
+
   defstruct date_range: nil,
             interval: nil,
             period: nil,
@@ -7,18 +9,24 @@ defmodule Plausible.Stats.Query do
             imported_data_requested: false,
             include_imported: false
 
-  @default_sample_threshold 20_000_000
   require OpenTelemetry.Tracer, as: Tracer
   alias Plausible.Stats.{FilterParser, Interval}
 
   @type t :: %__MODULE__{}
 
   def from(site, params) do
-    query_by_period(site, params)
-    |> put_interval(params)
-    |> put_parsed_filters(params)
-    |> put_imported_opts(site, params)
-    |> put_sample_threshold(params)
+    query =
+      query_by_period(site, params)
+      |> put_interval(params)
+      |> put_parsed_filters(params)
+      |> put_imported_opts(site, params)
+      |> maybe_drop_prop_filter(site)
+
+    on_full_build do
+      query = Plausible.Stats.Sampling.put_threshold(query, params)
+    end
+
+    query
   end
 
   defp query_by_period(site, %{"period" => "realtime"}) do
@@ -162,17 +170,6 @@ defmodule Plausible.Stats.Query do
     Map.put(query, :filters, FilterParser.parse_filters(params["filters"]))
   end
 
-  defp put_sample_threshold(query, params) do
-    sample_threshold =
-      case params["sample_threshold"] do
-        nil -> @default_sample_threshold
-        "infinite" -> :infinite
-        value -> String.to_integer(value)
-      end
-
-    Map.put(query, :sample_threshold, sample_threshold)
-  end
-
   def put_filter(query, key, val) do
     %__MODULE__{
       query
@@ -228,6 +225,19 @@ defmodule Plausible.Stats.Query do
     |> Map.put(:include_imported, include_imported?(query, site, requested?))
   end
 
+  defp maybe_drop_prop_filter(query, site) do
+    prop_filter? = Map.has_key?(query.filters, "props")
+
+    props_available? = fn ->
+      site = Plausible.Repo.preload(site, :owner)
+      Plausible.Billing.Feature.Props.check_availability(site.owner) == :ok
+    end
+
+    if prop_filter? && !props_available?.(),
+      do: %__MODULE__{query | filters: Map.drop(query.filters, ["props"])},
+      else: query
+  end
+
   @spec include_imported?(t(), Plausible.Site.t(), boolean()) :: boolean()
   def include_imported?(query, site, requested?) do
     cond do
@@ -240,12 +250,17 @@ defmodule Plausible.Stats.Query do
     end
   end
 
-  @spec trace(%__MODULE__{}) :: %__MODULE__{}
-  def trace(%__MODULE__{} = query) do
+  @spec trace(%__MODULE__{}, [atom()]) :: %__MODULE__{}
+  def trace(%__MODULE__{} = query, metrics) do
+    filter_keys = Map.keys(query.filters) |> Enum.sort() |> Enum.join(";")
+    metrics = metrics |> Enum.sort() |> Enum.join(";")
+
     Tracer.set_attributes([
       {"plausible.query.interval", query.interval},
       {"plausible.query.period", query.period},
-      {"plausible.query.include_imported", query.include_imported}
+      {"plausible.query.include_imported", query.include_imported},
+      {"plausible.query.filter_keys", filter_keys},
+      {"plausible.query.metrics", metrics}
     ])
 
     query

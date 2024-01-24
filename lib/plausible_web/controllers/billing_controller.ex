@@ -1,8 +1,10 @@
 defmodule PlausibleWeb.BillingController do
   use PlausibleWeb, :controller
   use Plausible.Repo
-  alias Plausible.Billing
   require Logger
+  require Plausible.Billing.Subscription.Status
+  alias Plausible.Billing
+  alias Plausible.Billing.{Plans, Subscription}
 
   plug PlausibleWeb.RequireAccountPlug
 
@@ -11,49 +13,55 @@ defmodule PlausibleWeb.BillingController do
     json(conn, %{is_subscribed: subscribed?})
   end
 
-  def upgrade(conn, _params) do
-    user =
-      conn.assigns[:current_user]
-      |> Repo.preload(:enterprise_plan)
+  def choose_plan(conn, _params) do
+    user = conn.assigns.current_user
 
-    cond do
-      user.subscription && user.subscription.status == "active" ->
-        redirect(conn, to: Routes.billing_path(conn, :change_plan_form))
-
-      user.enterprise_plan ->
-        redirect(conn,
-          to: Routes.billing_path(conn, :upgrade_enterprise_plan, user.enterprise_plan.id)
-        )
-
-      true ->
-        render(conn, "upgrade.html",
-          skip_plausible_tracking: true,
-          usage: Plausible.Billing.usage(user),
-          user: user,
-          layout: {PlausibleWeb.LayoutView, "focus.html"}
-        )
+    if Plausible.Auth.enterprise_configured?(user) do
+      redirect(conn, to: Routes.billing_path(conn, :upgrade_to_enterprise_plan))
+    else
+      render(conn, "choose_plan.html",
+        skip_plausible_tracking: true,
+        user: user,
+        layout: {PlausibleWeb.LayoutView, "focus.html"},
+        connect_live_socket: true
+      )
     end
   end
 
-  def upgrade_enterprise_plan(conn, %{"plan_id" => plan_id}) do
-    user = conn.assigns[:current_user]
-    subscription = user.subscription
-    plan = Repo.get_by(Plausible.Billing.EnterprisePlan, user_id: user.id, id: plan_id)
+  def upgrade_to_enterprise_plan(conn, _params) do
+    user = Plausible.Users.with_subscription(conn.assigns.current_user)
+
+    {latest_enterprise_plan, price} = Plans.latest_enterprise_plan_with_price(user)
+
+    subscription_resumable? = Plausible.Billing.Subscriptions.resumable?(user.subscription)
+
+    subscribed_to_latest? =
+      subscription_resumable? &&
+        user.subscription.paddle_plan_id == latest_enterprise_plan.paddle_plan_id
 
     cond do
-      plan && subscription && plan.paddle_plan_id == subscription.paddle_plan_id ->
-        redirect(conn, to: Routes.billing_path(conn, :change_plan_form))
+      Subscription.Status.in?(user.subscription, [
+        Subscription.Status.past_due(),
+        Subscription.Status.paused()
+      ]) ->
+        redirect(conn, to: Routes.auth_path(conn, :user_settings))
 
-      plan ->
-        render(conn, "upgrade_to_plan.html",
+      subscribed_to_latest? ->
+        render(conn, "change_enterprise_plan_contact_us.html",
           skip_plausible_tracking: true,
-          user: user,
-          plan: plan,
           layout: {PlausibleWeb.LayoutView, "focus.html"}
         )
 
       true ->
-        render_error(conn, 404)
+        render(conn, "upgrade_to_enterprise_plan.html",
+          user: user,
+          latest_enterprise_plan: latest_enterprise_plan,
+          price: price,
+          subscription_resumable: subscription_resumable?,
+          contact_link: "https://plausible.io/contact",
+          skip_plausible_tracking: true,
+          layout: {PlausibleWeb.LayoutView, "focus.html"}
+        )
     end
   end
 
@@ -61,90 +69,52 @@ defmodule PlausibleWeb.BillingController do
     render(conn, "upgrade_success.html", layout: {PlausibleWeb.LayoutView, "focus.html"})
   end
 
-  def change_plan_form(conn, _params) do
-    user =
-      conn.assigns[:current_user]
-      |> Repo.preload(:enterprise_plan)
+  def change_plan_preview(conn, %{"plan_id" => new_plan_id}) do
+    user = conn.assigns.current_user
 
-    subscription = Billing.active_subscription_for(user.id)
-
-    cond do
-      subscription && user.enterprise_plan &&
-          subscription.paddle_plan_id !== user.enterprise_plan.paddle_plan_id ->
-        redirect(conn,
-          to: Routes.billing_path(conn, :change_enterprise_plan, user.enterprise_plan.id)
-        )
-
-      subscription && user.enterprise_plan &&
-          subscription.paddle_plan_id == user.enterprise_plan.paddle_plan_id ->
-        render(conn, "change_enterprise_plan_contact_us.html",
-          skip_plausible_tracking: true,
-          user: user,
-          plan: user.enterprise_plan,
-          layout: {PlausibleWeb.LayoutView, "focus.html"}
-        )
-
-      subscription ->
-        render(conn, "change_plan.html",
+    case preview_subscription(user, new_plan_id) do
+      {:ok, {subscription, preview_info}} ->
+        render(conn, "change_plan_preview.html",
+          back_link: Routes.billing_path(conn, :choose_plan),
           skip_plausible_tracking: true,
           subscription: subscription,
+          preview_info: preview_info,
           layout: {PlausibleWeb.LayoutView, "focus.html"}
         )
 
-      true ->
-        redirect(conn, to: Routes.billing_path(conn, :upgrade))
-    end
-  end
-
-  def change_enterprise_plan(conn, %{"plan_id" => plan_id}) do
-    user = conn.assigns[:current_user]
-
-    new_plan = Repo.get_by(Plausible.Billing.EnterprisePlan, user_id: user.id, id: plan_id)
-
-    cond do
-      is_nil(user.subscription) ->
-        redirect(conn, to: "/billing/upgrade")
-
-      is_nil(new_plan) || new_plan.paddle_plan_id == user.subscription.paddle_plan_id ->
-        render_error(conn, 404)
-
-      true ->
-        render(conn, "change_enterprise_plan.html",
-          skip_plausible_tracking: true,
-          user: user,
-          plan: new_plan,
-          layout: {PlausibleWeb.LayoutView, "focus.html"}
-        )
-    end
-  end
-
-  def change_plan_preview(conn, %{"plan_id" => new_plan_id}) do
-    with {:ok, {subscription, preview_info}} <-
-           preview_subscription(conn.assigns.current_user, new_plan_id) do
-      render(conn, "change_plan_preview.html",
-        skip_plausible_tracking: true,
-        subscription: subscription,
-        preview_info: preview_info,
-        layout: {PlausibleWeb.LayoutView, "focus.html"}
-      )
-    else
       _ ->
-        redirect(conn, to: "/billing/upgrade")
+        msg =
+          "Something went wrong with loading your plan change information. Please try again, or contact us at support@plausible.io if the issue persists."
+
+        Sentry.capture_message("Error loading change plan preview",
+          extra: %{
+            message: msg,
+            new_plan_id: new_plan_id,
+            user_id: user.id
+          }
+        )
+
+        conn
+        |> put_flash(:error, msg)
+        |> redirect(to: Routes.billing_path(conn, :choose_plan))
     end
   end
 
   def change_plan(conn, %{"new_plan_id" => new_plan_id}) do
-    case Billing.change_plan(conn.assigns[:current_user], new_plan_id) do
+    case Billing.change_plan(conn.assigns.current_user, new_plan_id) do
       {:ok, _subscription} ->
         conn
         |> put_flash(:success, "Plan changed successfully")
         |> redirect(to: "/settings")
 
       {:error, e} ->
-        # https://developer.paddle.com/api-reference/intro/api-error-codes
         msg =
           case e do
+            {:over_plan_limits, exceeded_limits} ->
+              "Unable to subscribe to this plan because the following limits are exceeded: #{PlausibleWeb.TextHelpers.pretty_list(exceeded_limits)}"
+
             %{"code" => 147} ->
+              # https://developer.paddle.com/api-reference/intro/api-error-codes
               "We were unable to charge your card. Click 'update billing info' to update your payment details and try again."
 
             %{"message" => msg} when not is_nil(msg) ->
@@ -179,9 +149,5 @@ defmodule PlausibleWeb.BillingController do
     else
       {:error, :no_subscription}
     end
-  end
-
-  def preview_susbcription(_, _) do
-    {:error, :no_user_id}
   end
 end

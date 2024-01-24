@@ -12,12 +12,13 @@ defmodule Plausible.Application do
       Plausible.IngestRepo,
       Plausible.AsyncInsertRepo,
       Plausible.ImportDeletionRepo,
+      {Plausible.RateLimit, clean_period: :timer.minutes(10)},
       Plausible.Ingestion.Counters,
       {Finch, name: Plausible.Finch, pools: finch_pool_config()},
       {Phoenix.PubSub, name: Plausible.PubSub},
       Plausible.Session.Salts,
-      Plausible.Event.WriteBuffer,
-      Plausible.Session.WriteBuffer,
+      Supervisor.child_spec(Plausible.Event.WriteBuffer, id: Plausible.Event.WriteBuffer),
+      Supervisor.child_spec(Plausible.Session.WriteBuffer, id: Plausible.Session.WriteBuffer),
       ReferrerBlocklist,
       Supervisor.child_spec({Cachex, name: :user_agents, limit: 10_000, stats: true},
         id: :cachex_user_agents
@@ -28,6 +29,7 @@ defmodule Plausible.Application do
       {Plausible.Site.Cache, []},
       {Plausible.Site.Cache.Warmer.All, []},
       {Plausible.Site.Cache.Warmer.RecentlyUpdated, []},
+      {Plausible.Auth.TOTP.Vault, key: totp_vault_key()},
       PlausibleWeb.Endpoint,
       {Oban, Application.get_env(:plausible, Oban)},
       Plausible.PromEx
@@ -48,6 +50,13 @@ defmodule Plausible.Application do
   def config_change(changed, _new, removed) do
     PlausibleWeb.Endpoint.config_change(changed, removed)
     :ok
+  end
+
+  defp totp_vault_key() do
+    :plausible
+    |> Application.fetch_env!(Plausible.Auth.TOTP)
+    |> Keyword.fetch!(:vault_key)
+    |> Base.decode64!()
   end
 
   defp finch_pool_config() do
@@ -94,7 +103,9 @@ defmodule Plausible.Application do
       google_conf[:client_id] && google_conf[:client_secret] ->
         pool_config
         |> Map.put(google_conf[:api_url], conn_opts: [transport_opts: [timeout: 15_000]])
-        |> Map.put(google_conf[:reporting_api_url], conn_opts: [transport_opts: [timeout: 15_000]])
+        |> Map.put(google_conf[:reporting_api_url],
+          conn_opts: [transport_opts: [timeout: 15_000]]
+        )
 
       true ->
         pool_config

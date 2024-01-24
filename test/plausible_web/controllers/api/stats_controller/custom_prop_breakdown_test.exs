@@ -776,6 +776,7 @@ defmodule PlausibleWeb.Api.StatsController.CustomPropBreakdownTest do
              ]
     end
 
+    @tag :full_build_only
     test "returns revenue metrics when filtering by a revenue goal", %{conn: conn, site: site} do
       prop_key = "logged_in"
 
@@ -833,6 +834,7 @@ defmodule PlausibleWeb.Api.StatsController.CustomPropBreakdownTest do
              ]
     end
 
+    @tag :full_build_only
     test "returns revenue metrics when filtering by many revenue goals with same currency", %{
       conn: conn,
       site: site
@@ -1043,6 +1045,80 @@ defmodule PlausibleWeb.Api.StatsController.CustomPropBreakdownTest do
                  "percentage" => 33.3
                }
              ]
+    end
+
+    test "returns prop-breakdown with a prop_value matching filter", %{
+      conn: conn,
+      site: site
+    } do
+      populate_stats(site, [
+        build(:pageview, "meta.key": ["key"], "meta.value": ["foo"]),
+        build(:pageview, "meta.key": ["key"], "meta.value": ["bar"]),
+        build(:pageview, "meta.key": ["key"], "meta.value": ["bar"]),
+        build(:pageview, "meta.key": ["key"], "meta.value": ["foobar"]),
+        build(:pageview)
+      ])
+
+      filters = Jason.encode!(%{props: %{key: "~bar"}})
+
+      conn =
+        get(
+          conn,
+          "/api/stats/#{site.domain}/custom-prop-values/key?period=day&filters=#{filters}"
+        )
+
+      assert json_response(conn, 200) == [
+               %{
+                 "visitors" => 2,
+                 "name" => "bar",
+                 "events" => 2,
+                 "percentage" => 66.7
+               },
+               %{
+                 "visitors" => 1,
+                 "name" => "foobar",
+                 "events" => 1,
+                 "percentage" => 33.3
+               }
+             ]
+    end
+  end
+
+  describe "GET /api/stats/:domain/custom-prop-values/:prop_key - for a Growth subscription" do
+    setup [:create_user, :log_in, :create_new_site]
+
+    setup %{user: user, site: site} do
+      insert(:growth_subscription, user: user)
+
+      populate_stats(site, [
+        build(:pageview,
+          "meta.key": ["url", "path", "author"],
+          "meta.value": ["one", "two", "three"]
+        )
+      ])
+
+      :ok
+    end
+
+    test "returns breakdown for internally used prop keys", %{conn: conn, site: site} do
+      [%{"visitors" => 1, "name" => "one"}] =
+        conn
+        |> get("/api/stats/#{site.domain}/custom-prop-values/url?period=day")
+        |> json_response(200)
+
+      [%{"visitors" => 1, "name" => "two"}] =
+        conn
+        |> get("/api/stats/#{site.domain}/custom-prop-values/path?period=day")
+        |> json_response(200)
+    end
+
+    test "returns 402 'upgrade required' for any other prop key", %{conn: conn, site: site} do
+      conn = get(conn, "/api/stats/#{site.domain}/custom-prop-values/prop?period=day")
+
+      assert json_response(conn, 402) == %{
+               "error" =>
+                 "Custom Properties is part of the Plausible Business plan. To get access to this feature, please upgrade your account."
+             }
     end
   end
 end

@@ -1,11 +1,15 @@
 defmodule PlausibleWeb.Api.StatsController do
+  use Plausible
   use PlausibleWeb, :controller
   use Plausible.Repo
-  use Plug.ErrorHandler
+  use PlausibleWeb.Plugs.ErrorHandler
   alias Plausible.Stats
-  alias Plausible.Stats.{Query, Filters, Comparisons, CustomProps}
+  alias Plausible.Stats.{Query, Filters, Comparisons}
+  alias PlausibleWeb.Api.Helpers, as: H
 
   require Logger
+
+  @revenue_metrics on_full_build(do: Plausible.Stats.Goal.Revenue.revenue_metrics(), else: [])
 
   plug(:validate_common_input)
 
@@ -337,7 +341,7 @@ defmodule PlausibleWeb.Api.StatsController do
 
   defp fetch_top_stats(site, %Query{filters: %{"event:goal" => _}} = query, comparison_query) do
     query_without_filters = Query.remove_event_filters(query, [:goal, :props])
-    metrics = [:visitors, :events, :average_revenue, :total_revenue]
+    metrics = [:visitors, :events] ++ @revenue_metrics
 
     results_without_filters =
       site
@@ -384,8 +388,12 @@ defmodule PlausibleWeb.Api.StatsController do
       top_stats_entry(results, comparison, "Unique visitors", :unique_visitors),
       top_stats_entry(results, comparison, "Unique conversions", :converted_visitors),
       top_stats_entry(results, comparison, "Total conversions", :completions),
-      top_stats_entry(results, comparison, "Average revenue", :average_revenue, &format_money/1),
-      top_stats_entry(results, comparison, "Total revenue", :total_revenue, &format_money/1),
+      on_full_build do
+        top_stats_entry(results, comparison, "Average revenue", :average_revenue, &format_money/1)
+      end,
+      on_full_build do
+        top_stats_entry(results, comparison, "Total revenue", :total_revenue, &format_money/1)
+      end,
       top_stats_entry(conversion_rate, comparison_conversion_rate, "Conversion rate", :cr)
     ]
     |> Enum.reject(&is_nil/1)
@@ -439,7 +447,7 @@ defmodule PlausibleWeb.Api.StatsController do
 
       if prev_results do
         prev_value = get_in(prev_results, [key, :value])
-        change = calculate_change(key, prev_value, value)
+        change = Stats.Compare.calculate_change(key, prev_value, value)
 
         %{
           name: name,
@@ -450,35 +458,6 @@ defmodule PlausibleWeb.Api.StatsController do
       else
         %{name: name, value: formatter.(value)}
       end
-    end
-  end
-
-  defp calculate_change(:bounce_rate, old_count, new_count) do
-    if old_count > 0, do: new_count - old_count
-  end
-
-  defp calculate_change(_metric, old_count, new_count) do
-    percent_change(old_count, new_count)
-  end
-
-  defp percent_change(nil, _new_count), do: nil
-
-  defp percent_change(%Money{} = old_count, %Money{} = new_count) do
-    old_count = old_count |> Money.to_decimal() |> Decimal.to_float()
-    new_count = new_count |> Money.to_decimal() |> Decimal.to_float()
-    percent_change(old_count, new_count)
-  end
-
-  defp percent_change(old_count, new_count) do
-    cond do
-      old_count == 0 and new_count > 0 ->
-        100
-
-      old_count == 0 and new_count == 0 ->
-        0
-
-      true ->
-        round((new_count - old_count) / old_count * 100)
     end
   end
 
@@ -512,49 +491,58 @@ defmodule PlausibleWeb.Api.StatsController do
     end
   end
 
-  def funnel(conn, %{"id" => funnel_id} = params) do
-    site = conn.assigns[:site]
+  on_full_build do
+    def funnel(conn, %{"id" => funnel_id} = params) do
+      site = Plausible.Repo.preload(conn.assigns.site, :owner)
 
-    with :ok <- validate_params(site, params),
-         query <- Query.from(site, params) |> Filters.add_prefix(),
-         :ok <- validate_funnel_query(query),
-         {funnel_id, ""} <- Integer.parse(funnel_id),
-         {:ok, funnel} <- Stats.funnel(site, query, funnel_id) do
-      json(conn, funnel)
-    else
-      {:error, {:invalid_funnel_query, due_to}} ->
-        bad_request(
-          conn,
-          "We are unable to show funnels when the dashboard is filtered by #{due_to}",
-          %{
-            level: :normal
-          }
-        )
+      with :ok <- Plausible.Billing.Feature.Funnels.check_availability(site.owner),
+           :ok <- validate_params(site, params),
+           query <- Query.from(site, params) |> Filters.add_prefix(),
+           :ok <- validate_funnel_query(query),
+           {funnel_id, ""} <- Integer.parse(funnel_id),
+           {:ok, funnel} <- Stats.funnel(site, query, funnel_id) do
+        json(conn, funnel)
+      else
+        {:error, {:invalid_funnel_query, due_to}} ->
+          bad_request(
+            conn,
+            "We are unable to show funnels when the dashboard is filtered by #{due_to}",
+            %{
+              level: :normal
+            }
+          )
 
-      {:error, :funnel_not_found} ->
-        conn
-        |> put_status(404)
-        |> json(%{error: "Funnel not found"})
-        |> halt()
+        {:error, :funnel_not_found} ->
+          conn
+          |> put_status(404)
+          |> json(%{error: "Funnel not found"})
+          |> halt()
 
-      _ ->
-        bad_request(conn, "There was an error with your request")
+        {:error, :upgrade_required} ->
+          H.payment_required(
+            conn,
+            "#{Plausible.Billing.Feature.Funnels.display_name()} is part of the Plausible Business plan. To get access to this feature, please upgrade your account."
+          )
+
+        _ ->
+          bad_request(conn, "There was an error with your request")
+      end
     end
-  end
 
-  defp validate_funnel_query(query) do
-    case query do
-      _ when is_map_key(query.filters, "event:goal") ->
-        {:error, {:invalid_funnel_query, "goals"}}
+    defp validate_funnel_query(query) do
+      case query do
+        _ when is_map_key(query.filters, "event:goal") ->
+          {:error, {:invalid_funnel_query, "goals"}}
 
-      _ when is_map_key(query.filters, "event:page") ->
-        {:error, {:invalid_funnel_query, "pages"}}
+        _ when is_map_key(query.filters, "event:page") ->
+          {:error, {:invalid_funnel_query, "pages"}}
 
-      _ when query.period == "realtime" ->
-        {:error, {:invalid_funnel_query, "realtime period"}}
+        _ when query.period == "realtime" ->
+          {:error, {:invalid_funnel_query, "realtime period"}}
 
-      _ ->
-        :ok
+        _ ->
+          :ok
+      end
     end
   end
 
@@ -1065,7 +1053,23 @@ defmodule PlausibleWeb.Api.StatsController do
       |> transform_keys(%{browser_version: :name})
       |> add_percentages(site, query)
 
-    json(conn, versions)
+    if params["csv"] do
+      if Map.has_key?(query.filters, "event:goal") do
+        versions
+        |> transform_keys(%{
+          name: :version,
+          browser: :name,
+          visitors: :conversions
+        })
+        |> to_csv([:name, :version, :conversions, :conversion_rate])
+      else
+        versions
+        |> transform_keys(%{name: :version, browser: :name})
+        |> to_csv([:name, :version, :visitors])
+      end
+    else
+      json(conn, versions)
+    end
   end
 
   def operating_systems(conn, params) do
@@ -1155,8 +1159,12 @@ defmodule PlausibleWeb.Api.StatsController do
     %{visitors: %{value: total_visitors}} = Stats.aggregate(site, total_q, [:visitors])
 
     metrics =
-      if Enum.any?(site.goals, &Plausible.Goal.revenue?/1) do
-        [:visitors, :events, :average_revenue, :total_revenue]
+      on_full_build do
+        if Enum.any?(site.goals, &Plausible.Goal.Revenue.revenue?/1) do
+          [:visitors, :events] ++ @revenue_metrics
+        else
+          [:visitors, :events]
+        end
       else
         [:visitors, :events]
       end
@@ -1167,7 +1175,6 @@ defmodule PlausibleWeb.Api.StatsController do
       |> transform_keys(%{goal: :name})
       |> Enum.map(fn goal ->
         goal
-        |> Map.put(:prop_names, CustomProps.props_for_goal(site, query))
         |> Map.put(:conversion_rate, calculate_cr(total_visitors, goal[:visitors]))
         |> Enum.map(&format_revenue_metric/1)
         |> Map.new()
@@ -1184,55 +1191,53 @@ defmodule PlausibleWeb.Api.StatsController do
     end
   end
 
-  @revenue_metrics [:average_revenue, :total_revenue]
-  defp format_revenue_metric({metric, value}) do
-    if metric in @revenue_metrics do
-      {metric, format_money(value)}
-    else
-      {metric, value}
-    end
-  end
-
-  defp format_money(value) do
-    case value do
-      %Money{} ->
-        %{
-          short: Money.to_string!(value, format: :short, fractional_digits: 1),
-          long: Money.to_string!(value)
-        }
-
-      _any ->
-        value
-    end
-  end
-
   def custom_prop_values(conn, params) do
-    site = conn.assigns[:site]
-    props = breakdown_custom_prop_values(site, params)
-    json(conn, props)
+    site = Plausible.Repo.preload(conn.assigns.site, :owner)
+    prop_key = Map.fetch!(params, "prop_key")
+
+    case Plausible.Props.ensure_prop_key_accessible(prop_key, site.owner) do
+      :ok ->
+        props = breakdown_custom_prop_values(site, params)
+        json(conn, props)
+
+      {:error, :upgrade_required} ->
+        H.payment_required(
+          conn,
+          "#{Plausible.Billing.Feature.Props.display_name()} is part of the Plausible Business plan. To get access to this feature, please upgrade your account."
+        )
+    end
   end
 
   def all_custom_prop_values(conn, params) do
-    site = conn.assigns[:site]
+    site = conn.assigns.site
     query = Query.from(site, params) |> Filters.add_prefix()
 
     prop_names = Plausible.Stats.CustomProps.fetch_prop_names(site, query)
 
-    values =
-      prop_names
-      |> Enum.map(fn prop_key ->
-        breakdown_custom_prop_values(site, Map.put(params, "prop_key", prop_key))
-        |> Enum.map(&Map.put(&1, :property, prop_key))
-        |> transform_keys(%{:name => :value})
-      end)
-      |> Enum.concat()
+    prop_names =
+      if Plausible.Billing.Feature.Props.enabled?(site) do
+        prop_names
+      else
+        prop_names |> Enum.filter(&(&1 in Plausible.Props.internal_keys()))
+      end
 
-    percent_or_cr =
-      if query.filters["event:goal"],
-        do: :conversion_rate,
-        else: :percentage
+    if not Enum.empty?(prop_names) do
+      values =
+        prop_names
+        |> Enum.map(fn prop_key ->
+          breakdown_custom_prop_values(site, Map.put(params, "prop_key", prop_key))
+          |> Enum.map(&Map.put(&1, :property, prop_key))
+          |> transform_keys(%{:name => :value})
+        end)
+        |> Enum.concat()
 
-    to_csv(values, [:property, :value, :visitors, :events, percent_or_cr])
+      percent_or_cr =
+        if query.filters["event:goal"],
+          do: :conversion_rate,
+          else: :percentage
+
+      to_csv(values, [:property, :value, :visitors, :events, percent_or_cr])
+    end
   end
 
   defp breakdown_custom_prop_values(site, %{"prop_key" => prop_key} = params) do
@@ -1245,8 +1250,8 @@ defmodule PlausibleWeb.Api.StatsController do
       |> Map.put(:include_imported, false)
 
     metrics =
-      if Map.has_key?(query.filters, "event:goal") do
-        [:visitors, :events, :average_revenue, :total_revenue]
+      if full_build?() and Map.has_key?(query.filters, "event:goal") do
+        [:visitors, :events] ++ @revenue_metrics
       else
         [:visitors, :events]
       end
@@ -1273,71 +1278,12 @@ defmodule PlausibleWeb.Api.StatsController do
     end
   end
 
-  def prop_breakdown(conn, params) do
-    site = conn.assigns[:site]
-    query = Query.from(site, params) |> Filters.add_prefix()
-    pagination = parse_pagination(params)
-
-    total_q = Query.remove_event_filters(query, [:goal, :props])
-
-    %{:visitors => %{value: unique_visitors}} = Stats.aggregate(site, total_q, [:visitors])
-
-    prop_name = "event:props:" <> params["prop_name"]
-
-    props =
-      Stats.breakdown(
-        site,
-        query,
-        prop_name,
-        [:visitors, :events, :average_revenue, :total_revenue],
-        pagination
-      )
-      |> transform_keys(%{
-        params["prop_name"] => :name,
-        :events => :total_conversions,
-        :visitors => :unique_conversions
-      })
-      |> Enum.map(fn prop ->
-        prop
-        |> Map.put(:conversion_rate, calculate_cr(unique_visitors, prop[:unique_conversions]))
-        |> Enum.map(&format_revenue_metric/1)
-        |> Map.new()
-      end)
-
-    if params["csv"] do
-      props
-    else
-      json(conn, props)
-    end
-  end
-
-  def all_props_breakdown(conn, params) do
-    site = conn.assigns[:site]
-    query = Query.from(site, params) |> Filters.add_prefix()
-
-    prop_names = Plausible.Stats.CustomProps.props_for_goal(site, query)
-
-    values =
-      prop_names
-      |> Enum.map(fn prop ->
-        prop_breakdown(conn, Map.put(params, "prop_name", prop))
-        |> Enum.map(&Map.put(&1, :prop, prop))
-      end)
-      |> Enum.concat()
-
-    to_csv(values, [:prop, :name, :unique_conversions, :total_conversions])
-  end
-
   def current_visitors(conn, _) do
     site = conn.assigns[:site]
     json(conn, Stats.current_visitors(site))
   end
 
   defp google_api(), do: Application.fetch_env!(:plausible, :google_api)
-
-  def handle_errors(conn, %{kind: kind, reason: reason}) do
-    json(conn, %{error: Exception.format_banner(kind, reason)})
-  end
 
   def filter_suggestions(conn, params) do
     site = conn.assigns[:site]
@@ -1399,8 +1345,8 @@ defmodule PlausibleWeb.Api.StatsController do
       |> Query.put_filter(filter_name, {:member, items})
       |> Query.remove_event_filters([:goal, :props])
 
-    # Here, we're always only interested in the first page of results 
-    # - the :member filter makes sure that the results always match with 
+    # Here, we're always only interested in the first page of results
+    # - the :member filter makes sure that the results always match with
     # the items in the given breakdown_results list
     pagination = {elem(pagination, 0), 1}
 
@@ -1540,6 +1486,15 @@ defmodule PlausibleWeb.Api.StatsController do
       source_query.include_imported -> true
       comparison_query && comparison_query.include_imported -> true
       true -> false
+    end
+  end
+
+  on_full_build do
+    defdelegate format_revenue_metric(metric_value), to: PlausibleWeb.Controllers.API.Revenue
+    defdelegate format_money(money), to: PlausibleWeb.Controllers.API.Revenue
+  else
+    defp format_revenue_metric({metric, value}) do
+      {metric, value}
     end
   end
 end

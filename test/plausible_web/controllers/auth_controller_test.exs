@@ -3,8 +3,22 @@ defmodule PlausibleWeb.AuthControllerTest do
   use Bamboo.Test
   use Plausible.Repo
 
+  import Plausible.Test.Support.HTML
   import Mox
-  setup :verify_on_exit!
+
+  require Logger
+  require Plausible.Billing.Subscription.Status
+
+  alias Plausible.Auth
+  alias Plausible.Auth.User
+  alias Plausible.Billing.Subscription
+
+  setup {PlausibleWeb.FirstLaunchPlug.Test, :skip}
+  setup [:verify_on_exit!]
+
+  @v3_plan_id "749355"
+  @v4_plan_id "857097"
+  @configured_enterprise_plan_paddle_plan_id "123"
 
   describe "GET /register" do
     test "shows the register form", %{conn: conn} do
@@ -15,18 +29,20 @@ defmodule PlausibleWeb.AuthControllerTest do
   end
 
   describe "POST /register" do
-    setup do
-      mock_captcha_success()
-      :ok
-    end
-
     test "registering sends an activation link", %{conn: conn} do
-      post(conn, "/register",
-        user: %{
+      Repo.insert!(
+        User.new(%{
           name: "Jane Doe",
           email: "user@example.com",
-          password: "very-secret",
-          password_confirmation: "very-secret"
+          password: "very-secret-and-very-long-123",
+          password_confirmation: "very-secret-and-very-long-123"
+        })
+      )
+
+      post(conn, "/register",
+        user: %{
+          email: "user@example.com",
+          password: "very-secret-and-very-long-123"
         }
       )
 
@@ -36,59 +52,45 @@ defmodule PlausibleWeb.AuthControllerTest do
     end
 
     test "user is redirected to activate page after registration", %{conn: conn} do
+      Repo.insert!(
+        User.new(%{
+          name: "Jane Doe",
+          email: "user@example.com",
+          password: "very-secret-and-very-long-123",
+          password_confirmation: "very-secret-and-very-long-123"
+        })
+      )
+
       conn =
         post(conn, "/register",
           user: %{
-            name: "Jane Doe",
             email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
+            password: "very-secret-and-very-long-123"
           }
         )
 
       assert redirected_to(conn, 302) == "/activate"
     end
 
-    test "creates user record", %{conn: conn} do
-      post(conn, "/register",
-        user: %{
+    test "logs the user in", %{conn: conn} do
+      Repo.insert!(
+        User.new(%{
           name: "Jane Doe",
           email: "user@example.com",
-          password: "very-secret",
-          password_confirmation: "very-secret"
-        }
+          password: "very-secret-and-very-long-123",
+          password_confirmation: "very-secret-and-very-long-123"
+        })
       )
 
-      user = Repo.one(Plausible.Auth.User)
-      assert user.name == "Jane Doe"
-    end
-
-    test "logs the user in", %{conn: conn} do
       conn =
         post(conn, "/register",
           user: %{
-            name: "Jane Doe",
             email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
+            password: "very-secret-and-very-long-123"
           }
         )
 
       assert get_session(conn, :current_user_id)
-    end
-
-    test "user is redirected to activation after registration", %{conn: conn} do
-      conn =
-        post(conn, "/register",
-          user: %{
-            name: "Jane Doe",
-            email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
-          }
-        )
-
-      assert redirected_to(conn) == "/activate"
     end
   end
 
@@ -113,7 +115,6 @@ defmodule PlausibleWeb.AuthControllerTest do
 
   describe "POST /register/invitation/:invitation_id" do
     setup do
-      mock_captcha_success()
       inviter = insert(:user)
       site = insert(:site, members: [inviter])
 
@@ -125,6 +126,15 @@ defmodule PlausibleWeb.AuthControllerTest do
           role: :admin
         )
 
+      Repo.insert!(
+        User.new(%{
+          name: "Jane Doe",
+          email: "user@example.com",
+          password: "very-secret-and-very-long-123",
+          password_confirmation: "very-secret-and-very-long-123"
+        })
+      )
+
       {:ok, %{site: site, invitation: invitation}}
     end
 
@@ -133,8 +143,8 @@ defmodule PlausibleWeb.AuthControllerTest do
         user: %{
           name: "Jane Doe",
           email: "user@example.com",
-          password: "very-secret",
-          password_confirmation: "very-secret"
+          password: "very-secret-and-very-long-123",
+          password_confirmation: "very-secret-and-very-long-123"
         }
       )
 
@@ -152,43 +162,12 @@ defmodule PlausibleWeb.AuthControllerTest do
           user: %{
             name: "Jane Doe",
             email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
+            password: "very-secret-and-very-long-123",
+            password_confirmation: "very-secret-and-very-long-123"
           }
         )
 
       assert redirected_to(conn, 302) == "/activate"
-    end
-
-    test "creates user record", %{conn: conn, invitation: invitation} do
-      post(conn, "/register/invitation/#{invitation.invitation_id}",
-        user: %{
-          name: "Jane Doe",
-          email: "user@example.com",
-          password: "very-secret",
-          password_confirmation: "very-secret"
-        }
-      )
-
-      user = Repo.get_by(Plausible.Auth.User, email: "user@example.com")
-      assert user.name == "Jane Doe"
-    end
-
-    test "leaves trial_expiry_date null when invitation role is not :owner", %{
-      conn: conn,
-      invitation: invitation
-    } do
-      post(conn, "/register/invitation/#{invitation.invitation_id}",
-        user: %{
-          name: "Jane Doe",
-          email: "user@example.com",
-          password: "very-secret",
-          password_confirmation: "very-secret"
-        }
-      )
-
-      user = Repo.get_by(Plausible.Auth.User, email: "user@example.com")
-      assert is_nil(user.trial_expiry_date)
     end
 
     test "logs the user in", %{conn: conn, invitation: invitation} do
@@ -197,61 +176,12 @@ defmodule PlausibleWeb.AuthControllerTest do
           user: %{
             name: "Jane Doe",
             email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
+            password: "very-secret-and-very-long-123",
+            password_confirmation: "very-secret-and-very-long-123"
           }
         )
 
       assert get_session(conn, :current_user_id)
-    end
-
-    test "user is redirected to activation after registration", %{conn: conn} do
-      conn =
-        post(conn, "/register",
-          user: %{
-            name: "Jane Doe",
-            email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
-          }
-        )
-
-      assert redirected_to(conn) == "/activate"
-    end
-  end
-
-  describe "captcha failure" do
-    setup do
-      mock_captcha_failure()
-      inviter = insert(:user)
-      site = insert(:site, members: [inviter])
-
-      invitation =
-        insert(:invitation,
-          site_id: site.id,
-          inviter: inviter,
-          email: "user@email.co",
-          role: :admin
-        )
-
-      {:ok, %{site: site, invitation: invitation}}
-    end
-
-    test "renders captcha errors in case of captcha input verification failure", %{
-      conn: conn,
-      invitation: invitation
-    } do
-      conn =
-        post(conn, "/register/invitation/#{invitation.invitation_id}",
-          user: %{
-            name: "Jane Doe",
-            email: "user@example.com",
-            password: "very-secret",
-            password_confirmation: "very-secret"
-          }
-        )
-
-      assert html_response(conn, 200) =~ "Please complete the captcha"
     end
   end
 
@@ -277,18 +207,40 @@ defmodule PlausibleWeb.AuthControllerTest do
   describe "POST /activate/request-code" do
     setup [:create_user, :log_in]
 
-    test "associates an activation pin with the user account", %{conn: conn, user: user} do
+    test "generates an activation pin for user account", %{conn: conn, user: user} do
       post(conn, "/activate/request-code")
 
-      code =
-        Repo.one(
-          from c in "email_verification_codes",
-            where: c.user_id == ^user.id,
-            select: %{user_id: c.user_id, issued_at: c.issued_at}
-        )
+      assert code = Repo.get_by(Auth.EmailActivationCode, user_id: user.id)
 
-      assert code[:user_id] == user.id
-      assert Timex.after?(code[:issued_at], Timex.now() |> Timex.shift(seconds: -10))
+      assert code.user_id == user.id
+      refute Plausible.Auth.EmailVerification.expired?(code)
+    end
+
+    test "regenerates an activation pin even if there's one already", %{conn: conn, user: user} do
+      five_minutes_ago =
+        NaiveDateTime.utc_now()
+        |> Timex.shift(minutes: -5)
+        |> NaiveDateTime.truncate(:second)
+
+      {:ok, verification} = Auth.EmailVerification.issue_code(user, five_minutes_ago)
+
+      post(conn, "/activate/request-code")
+
+      assert new_verification = Repo.get_by(Auth.EmailActivationCode, user_id: user.id)
+
+      assert verification.id == new_verification.id
+      assert verification.user_id == new_verification.user_id
+      # this actually has a chance to fail 1 in 8999 runs
+      # but at the same time it's good to have a confirmation
+      # that it indeed generates a new code
+      if verification.code == new_verification.code do
+        Logger.warning(
+          "Congratulations! You you have hit 1 in 8999 chance of the same " <>
+            "email verification code repeating twice in a row!"
+        )
+      end
+
+      assert NaiveDateTime.compare(verification.issued_at, new_verification.issued_at) == :lt
     end
 
     test "sends activation email to user", %{conn: conn, user: user} do
@@ -299,7 +251,7 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert subject =~ "is your Plausible email verification code"
     end
 
-    test "redirets user to /activate", %{conn: conn} do
+    test "redirects user to /activate", %{conn: conn} do
       conn = post(conn, "/activate/request-code")
 
       assert redirected_to(conn, 302) == "/activate"
@@ -316,15 +268,14 @@ defmodule PlausibleWeb.AuthControllerTest do
     end
 
     test "with expired pin - reloads the form with error", %{conn: conn, user: user} do
-      Repo.insert_all("email_verification_codes", [
-        %{
-          code: 1234,
-          user_id: user.id,
-          issued_at: Timex.shift(Timex.now(), days: -1)
-        }
-      ])
+      one_day_ago =
+        NaiveDateTime.utc_now()
+        |> Timex.shift(days: -1)
+        |> NaiveDateTime.truncate(:second)
 
-      conn = post(conn, "/activate", %{code: "1234"})
+      {:ok, verification} = Auth.EmailVerification.issue_code(user, one_day_ago)
+
+      conn = post(conn, "/activate", %{code: verification.code})
 
       assert html_response(conn, 200) =~ "Code is expired, please request another one"
     end
@@ -333,13 +284,9 @@ defmodule PlausibleWeb.AuthControllerTest do
       Repo.update!(Plausible.Auth.User.changeset(user, %{email_verified: false}))
       post(conn, "/activate/request-code")
 
-      code =
-        Repo.one(
-          from c in "email_verification_codes", where: c.user_id == ^user.id, select: c.code
-        )
-        |> Integer.to_string()
+      verification = Repo.get_by!(Auth.EmailActivationCode, user_id: user.id)
 
-      conn = post(conn, "/activate", %{code: code})
+      conn = post(conn, "/activate", %{code: verification.code})
       user = Repo.get_by(Plausible.Auth.User, id: user.id)
 
       assert user.email_verified
@@ -352,30 +299,22 @@ defmodule PlausibleWeb.AuthControllerTest do
       Repo.update!(Plausible.Auth.User.changeset(user, %{email_verified: false}))
       post(conn, "/activate/request-code")
 
-      code =
-        Repo.one(
-          from c in "email_verification_codes", where: c.user_id == ^user.id, select: c.code
-        )
-        |> Integer.to_string()
+      verification = Repo.get_by!(Auth.EmailActivationCode, user_id: user.id)
 
-      conn = post(conn, "/activate", %{code: code})
+      conn = post(conn, "/activate", %{code: verification.code})
 
       assert redirected_to(conn) == "/sites"
     end
 
-    test "removes the user association from the verification code", %{conn: conn, user: user} do
+    test "removes used up verification code", %{conn: conn, user: user} do
       Repo.update!(Plausible.Auth.User.changeset(user, %{email_verified: false}))
       post(conn, "/activate/request-code")
 
-      code =
-        Repo.one(
-          from c in "email_verification_codes", where: c.user_id == ^user.id, select: c.code
-        )
-        |> Integer.to_string()
+      verification = Repo.get_by!(Auth.EmailActivationCode, user_id: user.id)
 
-      post(conn, "/activate", %{code: code})
+      post(conn, "/activate", %{code: verification.code})
 
-      refute Repo.exists?(from c in "email_verification_codes", where: c.user_id == ^user.id)
+      refute Repo.get_by(Auth.EmailActivationCode, user_id: user.id)
     end
   end
 
@@ -394,6 +333,73 @@ defmodule PlausibleWeb.AuthControllerTest do
 
       assert get_session(conn, :current_user_id) == user.id
       assert redirected_to(conn) == "/sites"
+    end
+
+    test "valid email and password with login_dest set - redirects properly", %{conn: conn} do
+      user = insert(:user, password: "password")
+
+      conn =
+        conn
+        |> init_session()
+        |> put_session(:login_dest, "/settings")
+
+      conn = post(conn, "/login", email: user.email, password: "password")
+
+      assert redirected_to(conn, 302) == "/settings"
+    end
+
+    test "valid email and password with 2FA enabled - sets 2FA session and redirects", %{
+      conn: conn
+    } do
+      user = insert(:user, password: "password")
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = post(conn, "/login", email: user.email, password: "password")
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :verify_2fa_form)
+
+      assert fetch_cookies(conn).cookies["session_2fa"].current_2fa_user_id == user.id
+      refute get_session(conn)["current_user_id"]
+    end
+
+    test "valid email and password with 2FA enabled and remember 2FA cookie set - logs the user in",
+         %{conn: conn} do
+      user = insert(:user, password: "password")
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = set_remember_2fa_cookie(conn, user)
+
+      conn = post(conn, "/login", email: user.email, password: "password")
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      assert get_session(conn, :current_user_id) == user.id
+    end
+
+    test "valid email and password with 2FA enabled and rogue remember 2FA cookie set - logs the user in",
+         %{conn: conn} do
+      user = insert(:user, password: "password")
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      another_user = insert(:user)
+      conn = set_remember_2fa_cookie(conn, another_user)
+
+      conn = post(conn, "/login", email: user.email, password: "password")
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :verify_2fa_form)
+
+      assert fetch_cookies(conn).cookies["session_2fa"].current_2fa_user_id == user.id
+      refute get_session(conn, :current_user_id)
     end
 
     test "email does not exist - renders login form again", %{conn: conn} do
@@ -415,28 +421,28 @@ defmodule PlausibleWeb.AuthControllerTest do
       user = insert(:user, password: "password")
 
       build_conn()
-      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> put_req_header("x-forwarded-for", "1.2.3.5")
       |> post("/login", email: user.email, password: "wrong")
 
       build_conn()
-      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> put_req_header("x-forwarded-for", "1.2.3.5")
       |> post("/login", email: user.email, password: "wrong")
 
       build_conn()
-      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> put_req_header("x-forwarded-for", "1.2.3.5")
       |> post("/login", email: user.email, password: "wrong")
 
       build_conn()
-      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> put_req_header("x-forwarded-for", "1.2.3.5")
       |> post("/login", email: user.email, password: "wrong")
 
       build_conn()
-      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> put_req_header("x-forwarded-for", "1.2.3.5")
       |> post("/login", email: user.email, password: "wrong")
 
       conn =
         build_conn()
-        |> put_req_header("x-forwarded-for", "1.1.1.1")
+        |> put_req_header("x-forwarded-for", "1.2.3.5")
         |> post("/login", email: user.email, password: "wrong")
 
       assert get_session(conn, :current_user_id) == nil
@@ -478,7 +484,8 @@ defmodule PlausibleWeb.AuthControllerTest do
 
   describe "GET /password/reset" do
     test "with valid token - shows form", %{conn: conn} do
-      token = Plausible.Auth.Token.sign_password_reset("email@example.com")
+      user = insert(:user)
+      token = Plausible.Auth.Token.sign_password_reset(user.email)
       conn = get(conn, "/password/reset", %{token: token})
 
       assert html_response(conn, 200) =~ "Reset your password"
@@ -489,28 +496,22 @@ defmodule PlausibleWeb.AuthControllerTest do
 
       assert html_response(conn, 401) =~ "Your token is invalid"
     end
+
+    test "without token - shows error page", %{conn: conn} do
+      conn = get(conn, "/password/reset", %{})
+
+      assert html_response(conn, 401) =~ "Your token is invalid"
+    end
   end
 
   describe "POST /password/reset" do
-    alias Plausible.Auth.{User, Token, Password}
-
-    test "with valid token - resets the password", %{conn: conn} do
-      user = insert(:user)
-      token = Token.sign_password_reset(user.email)
-      post(conn, "/password/reset", %{token: token, password: "new-password"})
-
-      user = Plausible.Repo.get(User, user.id)
-      assert Password.match?("new-password", user.password_hash)
-    end
-
-    test "with valid token - redirects the user to login and shows success message", %{conn: conn} do
-      user = insert(:user)
-      token = Token.sign_password_reset(user.email)
-      conn = post(conn, "/password/reset", %{token: token, password: "new-password"})
+    test "redirects the user to login and shows success message", %{conn: conn} do
+      conn = post(conn, "/password/reset", %{})
 
       assert location = "/login" = redirected_to(conn, 302)
 
-      conn = get(recycle(conn), location)
+      {:ok, %{conn: conn}} = PlausibleWeb.FirstLaunchPlug.Test.skip(%{conn: recycle(conn)})
+      conn = get(conn, location)
       assert html_response(conn, 200) =~ "Password updated successfully"
     end
   end
@@ -520,9 +521,12 @@ defmodule PlausibleWeb.AuthControllerTest do
 
     test "shows the form", %{conn: conn} do
       conn = get(conn, "/settings")
-      assert html_response(conn, 200) =~ "Account settings"
+      assert resp = html_response(conn, 200)
+      assert resp =~ "Change account name"
+      assert resp =~ "Change email address"
     end
 
+    @tag :full_build_only
     test "shows subscription", %{conn: conn, user: user} do
       insert(:subscription, paddle_plan_id: "558018", user: user)
       conn = get(conn, "/settings")
@@ -530,6 +534,7 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert html_response(conn, 200) =~ "monthly billing"
     end
 
+    @tag :full_build_only
     test "shows yearly subscription", %{conn: conn, user: user} do
       insert(:subscription, paddle_plan_id: "590752", user: user)
       conn = get(conn, "/settings")
@@ -537,6 +542,7 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert html_response(conn, 200) =~ "yearly billing"
     end
 
+    @tag :full_build_only
     test "shows free subscription", %{conn: conn, user: user} do
       insert(:subscription, paddle_plan_id: "free_10k", user: user)
       conn = get(conn, "/settings")
@@ -544,46 +550,227 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert html_response(conn, 200) =~ "N/A billing"
     end
 
+    @tag :full_build_only
     test "shows enterprise plan subscription", %{conn: conn, user: user} do
       insert(:subscription, paddle_plan_id: "123", user: user)
 
-      insert(:enterprise_plan,
-        paddle_plan_id: "123",
-        user: user,
-        monthly_pageview_limit: 10_000_000,
-        billing_interval: :yearly
-      )
+      configure_enterprise_plan(user)
 
       conn = get(conn, "/settings")
-      assert html_response(conn, 200) =~ "10M pageviews"
+      assert html_response(conn, 200) =~ "20M pageviews"
       assert html_response(conn, 200) =~ "yearly billing"
     end
 
+    @tag :full_build_only
     test "shows current enterprise plan subscription when user has a new one to upgrade to", %{
       conn: conn,
       user: user
     } do
-      insert(:subscription, paddle_plan_id: "123", user: user)
-
-      insert(:enterprise_plan,
-        paddle_plan_id: "123",
-        user: user,
-        monthly_pageview_limit: 10_000_000,
-        billing_interval: :yearly
+      insert(:subscription,
+        paddle_plan_id: @configured_enterprise_plan_paddle_plan_id,
+        user: user
       )
 
       insert(:enterprise_plan,
         paddle_plan_id: "1234",
         user: user,
-        monthly_pageview_limit: 20_000_000,
+        monthly_pageview_limit: 10_000_000,
         billing_interval: :yearly
       )
 
+      configure_enterprise_plan(user)
+
       conn = get(conn, "/settings")
-      assert html_response(conn, 200) =~ "10M pageviews"
+      assert html_response(conn, 200) =~ "20M pageviews"
       assert html_response(conn, 200) =~ "yearly billing"
     end
 
+    @tag :full_build_only
+    test "renders two links to '/billing/choose-plan` with the text 'Upgrade'", %{conn: conn} do
+      doc =
+        get(conn, "/settings")
+        |> html_response(200)
+
+      upgrade_link_1 = find(doc, "#monthly-quota-box a")
+      upgrade_link_2 = find(doc, "#upgrade-link-2")
+
+      assert text(upgrade_link_1) == "Upgrade"
+      assert text_of_attr(upgrade_link_1, "href") == Routes.billing_path(conn, :choose_plan)
+
+      assert text(upgrade_link_2) == "Upgrade"
+      assert text_of_attr(upgrade_link_2, "href") == Routes.billing_path(conn, :choose_plan)
+    end
+
+    @tag :full_build_only
+    test "renders a link to '/billing/choose-plan' with the text 'Change plan' + cancel link", %{
+      conn: conn,
+      user: user
+    } do
+      insert(:subscription, paddle_plan_id: @v3_plan_id, user: user)
+
+      doc =
+        get(conn, "/settings")
+        |> html_response(200)
+
+      refute element_exists?(doc, "#upgrade-link-2")
+      assert doc =~ "Cancel my subscription"
+
+      change_plan_link = find(doc, "#monthly-quota-box a")
+
+      assert text(change_plan_link) == "Change plan"
+      assert text_of_attr(change_plan_link, "href") == Routes.billing_path(conn, :choose_plan)
+    end
+
+    test "/billing/choose-plan link does not show up when enterprise subscription is past_due", %{
+      conn: conn,
+      user: user
+    } do
+      configure_enterprise_plan(user)
+
+      insert(:subscription,
+        user: user,
+        status: Subscription.Status.past_due(),
+        paddle_plan_id: @configured_enterprise_plan_paddle_plan_id
+      )
+
+      doc =
+        conn
+        |> get(Routes.auth_path(conn, :user_settings))
+        |> html_response(200)
+
+      refute element_exists?(doc, "#upgrade-or-change-plan-link")
+    end
+
+    test "/billing/choose-plan link does not show up when enterprise subscription is paused", %{
+      conn: conn,
+      user: user
+    } do
+      configure_enterprise_plan(user)
+
+      insert(:subscription,
+        user: user,
+        status: Subscription.Status.paused(),
+        paddle_plan_id: @configured_enterprise_plan_paddle_plan_id
+      )
+
+      doc =
+        conn
+        |> get(Routes.auth_path(conn, :user_settings))
+        |> html_response(200)
+
+      refute element_exists?(doc, "#upgrade-or-change-plan-link")
+    end
+
+    @tag :full_build_only
+    test "renders two links to '/billing/choose-plan' with the text 'Upgrade' for a configured enterprise plan",
+         %{conn: conn, user: user} do
+      configure_enterprise_plan(user)
+
+      doc =
+        get(conn, "/settings")
+        |> html_response(200)
+
+      upgrade_link_1 = find(doc, "#monthly-quota-box a")
+      upgrade_link_2 = find(doc, "#upgrade-link-2")
+
+      assert text(upgrade_link_1) == "Upgrade"
+
+      assert text_of_attr(upgrade_link_1, "href") ==
+               Routes.billing_path(conn, :choose_plan)
+
+      assert text(upgrade_link_2) == "Upgrade"
+
+      assert text_of_attr(upgrade_link_2, "href") ==
+               Routes.billing_path(conn, :choose_plan)
+    end
+
+    @tag :full_build_only
+    test "links to '/billing/choose-plan' with the text 'Change plan' for a configured enterprise plan with an existing subscription + renders cancel button",
+         %{conn: conn, user: user} do
+      insert(:subscription, paddle_plan_id: @v3_plan_id, user: user)
+
+      configure_enterprise_plan(user)
+
+      doc =
+        get(conn, "/settings")
+        |> html_response(200)
+
+      refute element_exists?(doc, "#upgrade-link-2")
+      assert doc =~ "Cancel my subscription"
+
+      change_plan_link = find(doc, "#monthly-quota-box a")
+
+      assert text(change_plan_link) == "Change plan"
+
+      assert text_of_attr(change_plan_link, "href") ==
+               Routes.billing_path(conn, :choose_plan)
+    end
+
+    @tag :full_build_only
+    test "renders cancelled subscription notice", %{conn: conn, user: user} do
+      insert(:subscription,
+        paddle_plan_id: @v4_plan_id,
+        user: user,
+        status: :deleted,
+        next_bill_date: ~D[2023-01-01]
+      )
+
+      notice_text =
+        get(conn, "/settings")
+        |> html_response(200)
+        |> text_of_element("#global-subscription-cancelled-notice")
+
+      assert notice_text =~ "Subscription cancelled"
+      assert notice_text =~ "Upgrade your subscription to get access to your stats again"
+    end
+
+    @tag :full_build_only
+    test "renders cancelled subscription notice with some subscription days still left", %{
+      conn: conn,
+      user: user
+    } do
+      insert(:subscription,
+        paddle_plan_id: @v4_plan_id,
+        user: user,
+        status: :deleted,
+        next_bill_date: Timex.shift(Timex.today(), days: 10)
+      )
+
+      notice_text =
+        get(conn, "/settings")
+        |> html_response(200)
+        |> text_of_element("#global-subscription-cancelled-notice")
+
+      assert notice_text =~ "Subscription cancelled"
+      assert notice_text =~ "You have access to your stats until"
+      assert notice_text =~ "Upgrade your subscription to make sure you don't lose access"
+    end
+
+    @tag :full_build_only
+    test "renders cancelled subscription notice with a warning about losing grandfathering", %{
+      conn: conn,
+      user: user
+    } do
+      insert(:subscription,
+        paddle_plan_id: @v3_plan_id,
+        user: user,
+        status: :deleted,
+        next_bill_date: Timex.shift(Timex.today(), days: 10)
+      )
+
+      notice_text =
+        get(conn, "/settings")
+        |> html_response(200)
+        |> text_of_element("#global-subscription-cancelled-notice")
+
+      assert notice_text =~ "Subscription cancelled"
+      assert notice_text =~ "You have access to your stats until"
+
+      assert notice_text =~
+               "by letting your subscription expire, you lose access to our grandfathered terms"
+    end
+
+    @tag :full_build_only
     test "shows invoices for subscribed user", %{conn: conn, user: user} do
       insert(:subscription,
         paddle_plan_id: "558018",
@@ -598,6 +785,7 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert html_response(conn, 200) =~ "$22.00"
     end
 
+    @tag :full_build_only
     test "shows 'something went wrong' on failed invoice request'", %{conn: conn, user: user} do
       insert(:subscription,
         paddle_plan_id: "558018",
@@ -622,6 +810,322 @@ defmodule PlausibleWeb.AuthControllerTest do
       conn = get(conn, "/settings")
       refute html_response(conn, 200) =~ "Invoices"
     end
+
+    @tag :full_build_only
+    test "renders pageview usage for current, last, and penultimate billing cycles", %{
+      conn: conn,
+      user: user
+    } do
+      site = insert(:site, members: [user])
+
+      populate_stats(site, [
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -5)),
+        build(:event, name: "customevent", timestamp: Timex.shift(Timex.now(), days: -20)),
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -50)),
+        build(:event, name: "customevent", timestamp: Timex.shift(Timex.now(), days: -50))
+      ])
+
+      last_bill_date = Timex.shift(Timex.today(), days: -10)
+
+      insert(:subscription,
+        paddle_plan_id: @v4_plan_id,
+        user: user,
+        status: :deleted,
+        last_bill_date: last_bill_date
+      )
+
+      doc = get(conn, "/settings") |> html_response(200)
+
+      assert text_of_element(doc, "#billing_cycle_tab_current_cycle") =~
+               Date.range(
+                 last_bill_date,
+                 Timex.shift(last_bill_date, months: 1, days: -1)
+               )
+               |> PlausibleWeb.TextHelpers.format_date_range()
+
+      assert text_of_element(doc, "#billing_cycle_tab_last_cycle") =~
+               Date.range(
+                 Timex.shift(last_bill_date, months: -1),
+                 Timex.shift(last_bill_date, days: -1)
+               )
+               |> PlausibleWeb.TextHelpers.format_date_range()
+
+      assert text_of_element(doc, "#billing_cycle_tab_penultimate_cycle") =~
+               Date.range(
+                 Timex.shift(last_bill_date, months: -2),
+                 Timex.shift(last_bill_date, months: -1, days: -1)
+               )
+               |> PlausibleWeb.TextHelpers.format_date_range()
+
+      assert text_of_element(doc, "#total_pageviews_current_cycle") =~
+               "Total billable pageviews 1"
+
+      assert text_of_element(doc, "#pageviews_current_cycle") =~ "Pageviews 1"
+      assert text_of_element(doc, "#custom_events_current_cycle") =~ "Custom events 0"
+
+      assert text_of_element(doc, "#total_pageviews_last_cycle") =~
+               "Total billable pageviews 1 / 10,000"
+
+      assert text_of_element(doc, "#pageviews_last_cycle") =~ "Pageviews 0"
+      assert text_of_element(doc, "#custom_events_last_cycle") =~ "Custom events 1"
+
+      assert text_of_element(doc, "#total_pageviews_penultimate_cycle") =~
+               "Total billable pageviews 2 / 10,000"
+
+      assert text_of_element(doc, "#pageviews_penultimate_cycle") =~ "Pageviews 1"
+      assert text_of_element(doc, "#custom_events_penultimate_cycle") =~ "Custom events 1"
+    end
+
+    @tag :full_build_only
+    test "renders pageview usage per billing cycle for active subscribers", %{
+      conn: conn,
+      user: user
+    } do
+      assert_cycles_rendered = fn doc ->
+        refute element_exists?(doc, "#total_pageviews_last_30_days")
+
+        assert element_exists?(doc, "#total_pageviews_current_cycle")
+        assert element_exists?(doc, "#total_pageviews_last_cycle")
+        assert element_exists?(doc, "#total_pageviews_penultimate_cycle")
+      end
+
+      # for an active subscription
+      subscription =
+        insert(:subscription,
+          paddle_plan_id: @v4_plan_id,
+          user: user,
+          status: :active,
+          last_bill_date: Timex.shift(Timex.now(), months: -6)
+        )
+
+      get(conn, "/settings") |> html_response(200) |> assert_cycles_rendered.()
+
+      # for a past_due subscription
+      subscription =
+        subscription
+        |> Plausible.Billing.Subscription.changeset(%{status: :past_due})
+        |> Repo.update!()
+
+      get(conn, "/settings") |> html_response(200) |> assert_cycles_rendered.()
+
+      # for a deleted (but not expired) subscription
+      subscription
+      |> Plausible.Billing.Subscription.changeset(%{
+        status: :deleted,
+        next_bill_date: Timex.shift(Timex.now(), months: 6)
+      })
+      |> Repo.update!()
+
+      get(conn, "/settings") |> html_response(200) |> assert_cycles_rendered.()
+    end
+
+    @tag :full_build_only
+    test "penultimate cycle is disabled if there's no usage", %{conn: conn, user: user} do
+      site = insert(:site, members: [user])
+
+      populate_stats(site, [
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -5)),
+        build(:event, name: "customevent", timestamp: Timex.shift(Timex.now(), days: -20))
+      ])
+
+      last_bill_date = Timex.shift(Timex.today(), days: -10)
+
+      insert(:subscription,
+        paddle_plan_id: @v4_plan_id,
+        user: user,
+        last_bill_date: last_bill_date
+      )
+
+      doc = get(conn, "/settings") |> html_response(200)
+
+      assert text_of_attr(find(doc, "#monthly_pageview_usage_container"), "x-data") ==
+               "{ tab: 'current_cycle' }"
+
+      assert class_of_element(doc, "#billing_cycle_tab_penultimate_cycle button") =~
+               "pointer-events-none"
+
+      assert text_of_element(doc, "#billing_cycle_tab_penultimate_cycle") =~ "Not available"
+    end
+
+    @tag :full_build_only
+    test "penultimate and last cycles are both disabled if there's no usage", %{
+      conn: conn,
+      user: user
+    } do
+      site = insert(:site, members: [user])
+
+      populate_stats(site, [
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -5))
+      ])
+
+      last_bill_date = Timex.shift(Timex.today(), days: -10)
+
+      insert(:subscription,
+        paddle_plan_id: @v4_plan_id,
+        user: user,
+        last_bill_date: last_bill_date
+      )
+
+      doc = get(conn, "/settings") |> html_response(200)
+
+      assert text_of_attr(find(doc, "#monthly_pageview_usage_container"), "x-data") ==
+               "{ tab: 'current_cycle' }"
+
+      assert class_of_element(doc, "#billing_cycle_tab_last_cycle button") =~
+               "pointer-events-none"
+
+      assert text_of_element(doc, "#billing_cycle_tab_last_cycle") =~ "Not available"
+
+      assert class_of_element(doc, "#billing_cycle_tab_penultimate_cycle button") =~
+               "pointer-events-none"
+
+      assert text_of_element(doc, "#billing_cycle_tab_penultimate_cycle") =~ "Not available"
+    end
+
+    @tag :full_build_only
+    test "when last cycle usage is 0, it's still not disabled if penultimate cycle has usage", %{
+      conn: conn,
+      user: user
+    } do
+      site = insert(:site, members: [user])
+
+      populate_stats(site, [
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -5)),
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -50))
+      ])
+
+      last_bill_date = Timex.shift(Timex.today(), days: -10)
+
+      insert(:subscription,
+        paddle_plan_id: @v4_plan_id,
+        user: user,
+        last_bill_date: last_bill_date
+      )
+
+      doc = get(conn, "/settings") |> html_response(200)
+
+      assert text_of_attr(find(doc, "#monthly_pageview_usage_container"), "x-data") ==
+               "{ tab: 'current_cycle' }"
+
+      refute class_of_element(doc, "#billing_cycle_tab_last_cycle") =~ "pointer-events-none"
+      refute text_of_element(doc, "#billing_cycle_tab_last_cycle") =~ "Not available"
+
+      refute class_of_element(doc, "#billing_cycle_tab_penultimate_cycle") =~
+               "pointer-events-none"
+
+      refute text_of_element(doc, "#billing_cycle_tab_penultimate_cycle") =~ "Not available"
+    end
+
+    @tag :full_build_only
+    test "renders last 30 days pageview usage for trials and non-active/free_10k subscriptions",
+         %{
+           conn: conn,
+           user: user
+         } do
+      site = insert(:site, members: [user])
+
+      populate_stats(site, [
+        build(:event, name: "pageview", timestamp: Timex.shift(Timex.now(), days: -1)),
+        build(:event, name: "customevent", timestamp: Timex.shift(Timex.now(), days: -10)),
+        build(:event, name: "customevent", timestamp: Timex.shift(Timex.now(), days: -20))
+      ])
+
+      assert_usage = fn doc ->
+        refute element_exists?(doc, "#total_pageviews_current_cycle")
+
+        assert text_of_element(doc, "#total_pageviews_last_30_days") =~
+                 "Total billable pageviews (last 30 days) 3"
+
+        assert text_of_element(doc, "#pageviews_last_30_days") =~ "Pageviews 1"
+        assert text_of_element(doc, "#custom_events_last_30_days") =~ "Custom events 2"
+      end
+
+      # for a trial user
+      get(conn, "/settings") |> html_response(200) |> assert_usage.()
+
+      # for an expired subscription
+      subscription =
+        insert(:subscription,
+          paddle_plan_id: @v4_plan_id,
+          user: user,
+          status: :deleted,
+          last_bill_date: ~D[2022-01-01],
+          next_bill_date: ~D[2022-02-01]
+        )
+
+      get(conn, "/settings") |> html_response(200) |> assert_usage.()
+
+      # for a paused subscription
+      subscription =
+        subscription
+        |> Plausible.Billing.Subscription.changeset(%{status: :paused})
+        |> Repo.update!()
+
+      get(conn, "/settings") |> html_response(200) |> assert_usage.()
+
+      # for a free_10k subscription (without a `last_bill_date`)
+      Repo.delete!(subscription)
+
+      Plausible.Billing.Subscription.free(%{user_id: user.id})
+      |> Repo.insert!()
+
+      get(conn, "/settings") |> html_response(200) |> assert_usage.()
+    end
+
+    @tag :full_build_only
+    test "renders sites usage and limit", %{conn: conn, user: user} do
+      insert(:subscription, paddle_plan_id: @v3_plan_id, user: user)
+      insert(:site, members: [user])
+
+      site_usage_row_text =
+        conn
+        |> get("/settings")
+        |> html_response(200)
+        |> text_of_element("#site-usage-row")
+
+      assert site_usage_row_text =~ "Owned sites 1 / 50"
+    end
+
+    @tag :full_build_only
+    test "renders team members usage and limit", %{conn: conn, user: user} do
+      insert(:subscription, paddle_plan_id: @v4_plan_id, user: user)
+
+      team_member_usage_row_text =
+        conn
+        |> get("/settings")
+        |> html_response(200)
+        |> text_of_element("#team-member-usage-row")
+
+      assert team_member_usage_row_text =~ "Team members 0 / 3"
+    end
+
+    @tag :full_build_only
+    test "renders team member usage without limit if it's unlimited", %{conn: conn, user: user} do
+      insert(:subscription, paddle_plan_id: @v3_plan_id, user: user)
+
+      team_member_usage_row_text =
+        conn
+        |> get("/settings")
+        |> html_response(200)
+        |> text_of_element("#team-member-usage-row")
+
+      assert team_member_usage_row_text == "Team members 0"
+    end
+
+    test "redners 2FA section in disabled state", %{conn: conn} do
+      conn = get(conn, "/settings")
+
+      assert html_response(conn, 200) =~ "Enable 2FA"
+    end
+
+    test "renders 2FA in enabled state", %{conn: conn, user: user} do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = get(conn, "/settings")
+
+      assert html_response(conn, 200) =~ "Disable 2FA"
+    end
   end
 
   describe "PUT /settings" do
@@ -634,6 +1138,18 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert user.name == "New name"
     end
 
+    test "does not allow setting non-profile fields", %{conn: conn, user: user} do
+      expiry_date = user.trial_expiry_date
+
+      assert %Date{} = expiry_date
+
+      put(conn, "/settings", %{
+        "user" => %{"name" => "New name", "trial_expiry_date" => "2023-07-14"}
+      })
+
+      assert Repo.reload!(user).trial_expiry_date == expiry_date
+    end
+
     test "redirects user to /settings", %{conn: conn} do
       conn = put(conn, "/settings", %{"user" => %{"name" => "New name"}})
 
@@ -644,6 +1160,171 @@ defmodule PlausibleWeb.AuthControllerTest do
       conn = put(conn, "/settings", %{"user" => %{"name" => ""}})
 
       assert html_response(conn, 200) =~ "can&#39;t be blank"
+    end
+  end
+
+  describe "PUT /settings/email" do
+    setup [:create_user, :log_in]
+
+    test "updates email and forces reverification", %{conn: conn, user: user} do
+      password = "very-long-very-secret-123"
+
+      user
+      |> User.set_password(password)
+      |> Repo.update!()
+
+      assert user.email_verified
+
+      conn =
+        put(conn, "/settings/email", %{
+          "user" => %{"email" => "new" <> user.email, "password" => password}
+        })
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :activate)
+
+      updated_user = Repo.reload!(user)
+
+      assert updated_user.email == "new" <> user.email
+      assert updated_user.previous_email == user.email
+      refute updated_user.email_verified
+
+      assert_delivered_email_matches(%{to: [{_, user_email}], subject: subject})
+      assert user_email == updated_user.email
+      assert subject =~ "is your Plausible email verification code"
+    end
+
+    test "renders an error on third change attempt (allows 2 per hour)", %{conn: conn, user: user} do
+      payload = %{
+        "user" => %{"email" => "new" <> user.email, "password" => "badpass"}
+      }
+
+      resp1 = conn |> put("/settings/email", payload) |> html_response(200)
+      assert resp1 =~ "is invalid"
+      refute resp1 =~ "too many requests, try again in an hour"
+
+      resp2 = conn |> put("/settings/email", payload) |> html_response(200)
+      assert resp2 =~ "is invalid"
+      refute resp2 =~ "too many requests, try again in an hour"
+
+      resp3 = conn |> put("/settings/email", payload) |> html_response(200)
+      assert resp3 =~ "is invalid"
+      assert resp3 =~ "too many requests, try again in an hour"
+    end
+
+    test "renders form with error on no fields filled", %{conn: conn} do
+      conn = put(conn, "/settings/email", %{"user" => %{}})
+
+      assert html_response(conn, 200) =~ "can&#39;t be blank"
+    end
+
+    test "renders form with error on invalid password", %{conn: conn, user: user} do
+      conn =
+        put(conn, "/settings/email", %{
+          "user" => %{"password" => "invalid", "email" => "new" <> user.email}
+        })
+
+      assert html_response(conn, 200) =~ "is invalid"
+    end
+
+    test "renders form with error on already taken email", %{conn: conn, user: user} do
+      other_user = insert(:user)
+
+      password = "very-long-very-secret-123"
+
+      user
+      |> User.set_password(password)
+      |> Repo.update!()
+
+      conn =
+        put(conn, "/settings/email", %{
+          "user" => %{"password" => password, "email" => other_user.email}
+        })
+
+      assert html_response(conn, 200) =~ "has already been taken"
+    end
+
+    test "renders form with error when email is identical with the current one", %{
+      conn: conn,
+      user: user
+    } do
+      password = "very-long-very-secret-123"
+
+      user
+      |> User.set_password(password)
+      |> Repo.update!()
+
+      conn =
+        put(conn, "/settings/email", %{
+          "user" => %{"password" => password, "email" => user.email}
+        })
+
+      assert html_response(conn, 200) =~ "can&#39;t be the same"
+    end
+  end
+
+  describe "POST /settings/email/cancel" do
+    setup [:create_user, :log_in]
+
+    test "cancels email reverification in progress", %{conn: conn, user: user} do
+      user =
+        user
+        |> Ecto.Changeset.change(
+          email_verified: false,
+          email: "new" <> user.email,
+          previous_email: user.email
+        )
+        |> Repo.update!()
+
+      conn = post(conn, "/settings/email/cancel")
+
+      assert redirected_to(conn, 302) ==
+               Routes.auth_path(conn, :user_settings) <> "#change-email-address"
+
+      updated_user = Repo.reload!(user)
+
+      assert updated_user.email_verified
+      assert updated_user.email == user.previous_email
+      refute updated_user.previous_email
+    end
+
+    test "fails to cancel reverification when previous email is already retaken", %{
+      conn: conn,
+      user: user
+    } do
+      user =
+        user
+        |> Ecto.Changeset.change(
+          email_verified: false,
+          email: "new" <> user.email,
+          previous_email: user.email
+        )
+        |> Repo.update!()
+
+      _other_user = insert(:user, email: user.previous_email)
+
+      conn = post(conn, "/settings/email/cancel")
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :activate_form)
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Could not cancel email update"
+    end
+
+    test "crashes when previous email is empty on cancel (should not happen)", %{
+      conn: conn,
+      user: user
+    } do
+      user
+      |> Ecto.Changeset.change(
+        email_verified: false,
+        email: "new" <> user.email,
+        previous_email: nil
+      )
+      |> Repo.update!()
+
+      assert_raise RuntimeError, ~r/Previous email is empty for user/, fn ->
+        post(conn, "/settings/email/cancel")
+      end
     end
   end
 
@@ -688,8 +1369,8 @@ defmodule PlausibleWeb.AuthControllerTest do
       ])
 
       insert(:google_auth, site: site, user: user)
-      insert(:subscription, user: user, status: "deleted")
-      insert(:subscription, user: user, status: "active")
+      insert(:subscription, user: user, status: Subscription.Status.deleted())
+      insert(:subscription, user: user, status: Subscription.Status.active())
 
       conn = delete(conn, "/me")
       assert redirected_to(conn) == "/"
@@ -714,8 +1395,7 @@ defmodule PlausibleWeb.AuthControllerTest do
     import Ecto.Query
 
     test "can create an API key", %{conn: conn, user: user} do
-      site = insert(:site)
-      insert(:site_membership, site: site, user: user, role: "owner")
+      insert(:site, memberships: [build(:site_membership, user: user, role: "owner")])
 
       conn =
         post(conn, "/settings/api-keys", %{
@@ -732,8 +1412,7 @@ defmodule PlausibleWeb.AuthControllerTest do
     end
 
     test "cannot create a duplicate API key", %{conn: conn, user: user} do
-      site = insert(:site)
-      insert(:site_membership, site: site, user: user, role: "owner")
+      insert(:site, memberships: [build(:site_membership, user: user, role: "owner")])
 
       conn =
         post(conn, "/settings/api-keys", %{
@@ -757,12 +1436,12 @@ defmodule PlausibleWeb.AuthControllerTest do
     end
 
     test "can't create api key into another site", %{conn: conn, user: me} do
-      my_site = insert(:site)
-      insert(:site_membership, site: my_site, user: me, role: "owner")
+      _my_site = insert(:site, memberships: [build(:site_membership, user: me, role: "owner")])
 
       other_user = insert(:user)
-      other_site = insert(:site)
-      insert(:site_membership, site: other_site, user: other_user, role: "owner")
+
+      _other_site =
+        insert(:site, memberships: [build(:site_membership, user: other_user, role: "owner")])
 
       conn =
         post(conn, "/settings/api-keys", %{
@@ -785,17 +1464,15 @@ defmodule PlausibleWeb.AuthControllerTest do
 
     test "can't delete api key that doesn't belong to me", %{conn: conn} do
       other_user = insert(:user)
-      insert(:site_membership, site: insert(:site), user: other_user, role: "owner")
+      insert(:site, memberships: [build(:site_membership, user: other_user, role: "owner")])
 
       assert {:ok, %ApiKey{} = api_key} =
                %ApiKey{user_id: other_user.id}
                |> ApiKey.changeset(%{"name" => "other user's key"})
                |> Repo.insert()
 
-      assert_raise Ecto.NoResultsError, fn ->
-        delete(conn, "/settings/api-keys/#{api_key.id}")
-      end
-
+      conn = delete(conn, "/settings/api-keys/#{api_key.id}")
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Could not find API Key to delete"
       assert Repo.get(ApiKey, api_key.id)
     end
   end
@@ -811,6 +1488,627 @@ defmodule PlausibleWeb.AuthControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
                "unable to authenticate your Google Analytics"
     end
+  end
+
+  describe "POST /2fa/setup/initiate" do
+    setup [:create_user, :log_in]
+
+    test "initiates setup rendering QR and human friendly versions of secret", %{
+      conn: conn,
+      user: user
+    } do
+      conn = post(conn, Routes.auth_path(conn, :initiate_2fa_setup))
+
+      secret = Base.encode32(Repo.reload!(user).totp_secret)
+
+      assert html = html_response(conn, 200)
+
+      assert element_exists?(html, "svg")
+      assert html =~ secret
+    end
+
+    test "redirects back to settings if 2FA is already setup", %{conn: conn, user: user} do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = post(conn, Routes.auth_path(conn, :initiate_2fa_setup))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Two-Factor Authentication is already setup"
+    end
+  end
+
+  describe "GET /2fa/setup/verify" do
+    setup [:create_user, :log_in]
+
+    test "renders form when 2FA setup is initiated", %{conn: conn, user: user} do
+      {:ok, _, _} = Auth.TOTP.initiate(user)
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_setup))
+
+      assert html = html_response(conn, 200)
+
+      assert text_of_attr(html, "form#verify-2fa-form", "action") ==
+               Routes.auth_path(conn, :verify_2fa_setup)
+
+      assert element_exists?(html, "input[name=code]")
+
+      assert text_of_attr(html, "form#start-over-form", "action") ==
+               Routes.auth_path(conn, :initiate_2fa_setup)
+    end
+
+    test "redirects back to settings if 2FA not initiated", %{conn: conn} do
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_setup))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+    end
+  end
+
+  describe "POST /2fa/setup/verify" do
+    setup [:create_user, :log_in]
+
+    test "enables 2FA and renders recovery codes when valid code provided", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa_setup), %{code: code})
+
+      assert html = html_response(conn, 200)
+
+      assert list = [_ | _] = find(html, "#recovery-codes-list > *")
+      assert length(list) == 10
+
+      assert user |> Repo.reload!() |> Auth.TOTP.enabled?()
+    end
+
+    test "renders error on invalid code provided", %{conn: conn, user: user} do
+      {:ok, _, _} = Auth.TOTP.initiate(user)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa_setup), %{code: "invalid"})
+
+      assert html_response(conn, 200)
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "The provided code is invalid."
+    end
+
+    test "redirects to settings when 2FA is not initiated", %{conn: conn} do
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa_setup), %{code: "123123"})
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Please enable Two-Factor Authentication"
+    end
+  end
+
+  describe "POST /2fa/disable" do
+    setup [:create_user, :log_in]
+
+    test "disables 2FA when valid password provided", %{conn: conn, user: user} do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = post(conn, Routes.auth_path(conn, :disable_2fa), %{password: "password"})
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :success) =~
+               "Two-Factor Authentication is disabled"
+
+      refute user |> Repo.reload!() |> Auth.TOTP.enabled?()
+    end
+
+    test "renders error when invalid password provided", %{conn: conn, user: user} do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = post(conn, Routes.auth_path(conn, :disable_2fa), %{password: "invalid"})
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Incorrect password provided"
+    end
+  end
+
+  describe "POST /2fa/recovery_codes" do
+    setup [:create_user, :log_in]
+
+    test "generates new recovery codes when valid password provided", %{conn: conn, user: user} do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn =
+        post(conn, Routes.auth_path(conn, :generate_2fa_recovery_codes), %{password: "password"})
+
+      assert html = html_response(conn, 200)
+
+      assert list = [_ | _] = find(html, "#recovery-codes-list > *")
+      assert length(list) == 10
+    end
+
+    test "renders error when invalid password provided", %{conn: conn, user: user} do
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn =
+        post(conn, Routes.auth_path(conn, :generate_2fa_recovery_codes), %{password: "invalid"})
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Incorrect password provided"
+    end
+
+    test "renders error when 2FA is not enabled", %{conn: conn} do
+      conn =
+        post(conn, Routes.auth_path(conn, :generate_2fa_recovery_codes), %{password: "password"})
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :user_settings) <> "#setup-2fa"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Please enable Two-Factor Authentication"
+    end
+  end
+
+  describe "GET /2fa/verify" do
+    test "renders verification form when 2FA session present", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_form))
+
+      assert html = html_response(conn, 200)
+
+      assert text_of_attr(html, "form", "action") == Routes.auth_path(conn, :verify_2fa)
+
+      assert element_exists?(html, "input[name=code]")
+
+      assert element_exists?(html, "input[name=remember_2fa]")
+
+      assert element_exists?(
+               html,
+               "a[href='#{Routes.auth_path(conn, :verify_2fa_recovery_code_form)}']"
+             )
+    end
+
+    test "redirects to login when cookie not found", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_form))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :login_form)
+    end
+
+    test "redirects to login when 2FA not enabled", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      {:ok, _} = Auth.TOTP.disable(user, "password")
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_form))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :login_form)
+    end
+  end
+
+  describe "POST /2fa/verify" do
+    test "redirects to sites when code verification succeeds", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: code})
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      # Remember cookie unset
+      assert conn.resp_cookies["remember_2fa"].max_age == 0
+    end
+
+    test "redirects to login_dest when set", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn =
+        conn
+        |> init_session()
+        |> put_session(:login_dest, "/settings")
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: code})
+
+      assert redirected_to(conn, 302) == "/settings"
+    end
+
+    test "sets remember cookie when device trusted", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: code, remember_2fa: "true"})
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      # Remember cookie set
+      assert conn.resp_cookies["remember_2fa"].max_age > 0
+    end
+
+    test "overwrites rogue remember cookie when device trusted", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      another_user = insert(:user, totp_token: "different_token")
+      conn = set_remember_2fa_cookie(conn, another_user)
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: code, remember_2fa: "true"})
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      # Remember cookie set
+      assert conn.resp_cookies["remember_2fa"].max_age > 0
+      assert fetch_cookies(conn).cookies["remember_2fa"] == user.totp_token
+    end
+
+    test "clears rogue remember cookie when device _not_ trusted", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      another_user = insert(:user, totp_token: "different_token")
+      conn = set_remember_2fa_cookie(conn, another_user)
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: code})
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      # Remember cookie cleared
+      assert conn.resp_cookies["remember_2fa"].max_age == 0
+    end
+
+    test "returns error on invalid code", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      assert html_response(conn, 200)
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "The provided code is invalid"
+    end
+
+    test "redirects to login when cookie not found", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa, %{code: code}))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :login_form)
+    end
+
+    test "passes through when 2FA is disabled", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      code = NimbleTOTP.verification_code(user.totp_secret)
+
+      {:ok, _} = Auth.TOTP.disable(user, "password")
+
+      conn = post(conn, Routes.auth_path(conn, :verify_2fa), %{code: code})
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+    end
+
+    test "limits verification attempts to 5 per minute", %{conn: conn} do
+      user = insert(:user, email: "ratio#{Ecto.UUID.generate()}@example.com")
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> post(Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> post(Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> post(Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> post(Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.1.1.1")
+      |> post(Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      conn =
+        conn
+        |> put_req_header("x-forwarded-for", "1.1.1.1")
+        |> post(Routes.auth_path(conn, :verify_2fa), %{code: "invalid"})
+
+      assert get_session(conn, :current_user_id) == nil
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      assert html_response(conn, 429) =~ "Too many login attempts"
+    end
+  end
+
+  describe "GET /2fa/use_recovery_code" do
+    test "renders recovery verification form when 2FA session present", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_recovery_code_form))
+
+      assert html = html_response(conn, 200)
+
+      assert text_of_attr(html, "form", "action") ==
+               Routes.auth_path(conn, :verify_2fa_recovery_code)
+
+      assert element_exists?(html, "input[name=recovery_code]")
+
+      assert element_exists?(html, "a[href='#{Routes.auth_path(conn, :verify_2fa_form)}']")
+    end
+
+    test "redirects to login when cookie not found", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_recovery_code_form))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :login_form)
+    end
+
+    test "redirects to login when 2FA not enabled", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      {:ok, _} = Auth.TOTP.disable(user, "password")
+
+      conn = get(conn, Routes.auth_path(conn, :verify_2fa_recovery_code_form))
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :login_form)
+    end
+  end
+
+  describe "POST /2fa/use_recovery_code" do
+    test "redirects to sites when recovery code verification succeeds", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, %{recovery_codes: [recovery_code | _]}} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn =
+        post(conn, Routes.auth_path(conn, :verify_2fa_recovery_code), %{
+          recovery_code: recovery_code
+        })
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+    end
+
+    test "returns error on invalid recovery code", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn =
+        post(conn, Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      assert html_response(conn, 200)
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "The provided recovery code is invalid"
+    end
+
+    test "redirects to login when cookie not found", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, _, %{recovery_codes: [recovery_code | _]}} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn =
+        post(
+          conn,
+          Routes.auth_path(conn, :verify_2fa_recovery_code, %{recovery_code: recovery_code})
+        )
+
+      assert redirected_to(conn, 302) == Routes.auth_path(conn, :login_form)
+    end
+
+    test "passes through when 2FA is disabled", %{conn: conn} do
+      user = insert(:user)
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, %{recovery_codes: [recovery_code | _]}} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      {:ok, _} = Auth.TOTP.disable(user, "password")
+
+      conn =
+        post(conn, Routes.auth_path(conn, :verify_2fa_recovery_code), %{
+          recovery_code: recovery_code
+        })
+
+      assert redirected_to(conn, 302) == Routes.site_path(conn, :index)
+
+      assert get_session(conn)["current_user_id"] == user.id
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+    end
+
+    test "limits verification attempts to 5 per minute", %{conn: conn} do
+      user = insert(:user, email: "ratio#{Ecto.UUID.generate()}@example.com")
+
+      # enable 2FA
+      {:ok, user, _} = Auth.TOTP.initiate(user)
+      {:ok, user, _} = Auth.TOTP.enable(user, :skip_verify)
+
+      conn = login_with_cookie(conn, user.email, "password")
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.2.3.4")
+      |> post(Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.2.3.4")
+      |> post(Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.2.3.4")
+      |> post(Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.2.3.4")
+      |> post(Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      conn
+      |> put_req_header("x-forwarded-for", "1.2.3.4")
+      |> post(Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      conn =
+        conn
+        |> put_req_header("x-forwarded-for", "1.2.3.4")
+        |> post(Routes.auth_path(conn, :verify_2fa_recovery_code), %{recovery_code: "invalid"})
+
+      assert get_session(conn, :current_user_id) == nil
+      # 2FA session terminated
+      assert conn.resp_cookies["session_2fa"].max_age == 0
+      assert html_response(conn, 429) =~ "Too many login attempts"
+    end
+  end
+
+  defp login_with_cookie(conn, email, password) do
+    conn
+    |> post(Routes.auth_path(conn, :login), %{
+      email: email,
+      password: password
+    })
+    |> recycle()
+    |> Map.put(:secret_key_base, secret_key_base())
+    |> Plug.Conn.put_req_header("x-forwarded-for", Plausible.TestUtils.random_ip())
+  end
+
+  defp set_remember_2fa_cookie(conn, user) do
+    conn
+    |> PlausibleWeb.TwoFactor.Session.maybe_set_remember_2fa(user, "true")
+    |> recycle()
+    |> Map.put(:secret_key_base, secret_key_base())
+    |> Plug.Conn.put_req_header("x-forwarded-for", Plausible.TestUtils.random_ip())
   end
 
   defp mock_captcha_success() do
@@ -834,5 +2132,20 @@ defmodule PlausibleWeb.AuthControllerTest do
          }}
       end
     )
+  end
+
+  defp configure_enterprise_plan(user) do
+    insert(:enterprise_plan,
+      paddle_plan_id: @configured_enterprise_plan_paddle_plan_id,
+      user: user,
+      monthly_pageview_limit: 20_000_000,
+      billing_interval: :yearly
+    )
+  end
+
+  defp secret_key_base() do
+    :plausible
+    |> Application.fetch_env!(PlausibleWeb.Endpoint)
+    |> Keyword.fetch!(:secret_key_base)
   end
 end

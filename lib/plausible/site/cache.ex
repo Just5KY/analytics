@@ -116,12 +116,13 @@ defmodule Plausible.Site.Cache do
   defp sites_by_domain_query do
     from s in Site,
       left_join: rg in assoc(s, :revenue_goals),
+      inner_join: owner in assoc(s, :owner),
       select: {
         s.domain,
         s.domain_changed_from,
         %{struct(s, ^@cached_schema_fields) | from_cache?: true}
       },
-      preload: [revenue_goals: rg]
+      preload: [revenue_goals: rg, owner: owner]
   end
 
   @spec merge(new_items :: [Site.t()], opts :: Keyword.t()) :: :ok
@@ -207,6 +208,18 @@ defmodule Plausible.Site.Cache do
   @spec telemetry_event_refresh(atom(), atom()) :: list(atom())
   def telemetry_event_refresh(cache_name \\ @cache_name, mode) when mode in @modes do
     [:plausible, :cache, cache_name, :refresh, mode]
+  end
+
+  @spec touch_site!(Site.t(), DateTime.t()) :: Site.t()
+  def touch_site!(site, now) do
+    now =
+      now
+      |> DateTime.truncate(:second)
+      |> DateTime.to_naive()
+
+    site
+    |> Ecto.Changeset.change(updated_at: now)
+    |> Plausible.Repo.update!()
   end
 
   def enabled?() do

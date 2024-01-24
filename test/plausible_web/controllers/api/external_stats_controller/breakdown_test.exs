@@ -1,9 +1,86 @@
 defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
   use PlausibleWeb.ConnCase
+  alias Plausible.Billing.Feature
 
   @user_id 1231
 
   setup [:create_user, :create_new_site, :create_api_key, :use_api_key]
+
+  describe "feature access" do
+    test "cannot break down by a custom prop without access to the props feature", %{
+      conn: conn,
+      user: user,
+      site: site
+    } do
+      ep = insert(:enterprise_plan, features: [Feature.StatsAPI], user_id: user.id)
+      insert(:subscription, user: user, paddle_plan_id: ep.paddle_plan_id)
+
+      conn =
+        get(conn, "/api/v1/stats/breakdown", %{
+          "site_id" => site.domain,
+          "property" => "event:props:author"
+        })
+
+      assert json_response(conn, 402)["error"] ==
+               "The owner of this site does not have access to the custom properties feature"
+    end
+
+    test "can break down by an internal prop key without access to the props feature", %{
+      conn: conn,
+      user: user,
+      site: site
+    } do
+      ep = insert(:enterprise_plan, features: [Feature.StatsAPI], user_id: user.id)
+      insert(:subscription, user: user, paddle_plan_id: ep.paddle_plan_id)
+
+      conn =
+        get(conn, "/api/v1/stats/breakdown", %{
+          "site_id" => site.domain,
+          "property" => "event:props:path"
+        })
+
+      assert json_response(conn, 200)["results"]
+    end
+
+    test "cannot filter by a custom prop without access to the props feature", %{
+      conn: conn,
+      user: user,
+      site: site
+    } do
+      ep =
+        insert(:enterprise_plan, features: [Feature.StatsAPI], user_id: user.id)
+
+      insert(:subscription, user: user, paddle_plan_id: ep.paddle_plan_id)
+
+      conn =
+        get(conn, "/api/v1/stats/breakdown", %{
+          "site_id" => site.domain,
+          "property" => "visit:source",
+          "filters" => "event:props:author==Uku"
+        })
+
+      assert json_response(conn, 402)["error"] ==
+               "The owner of this site does not have access to the custom properties feature"
+    end
+
+    test "can filter by an internal prop key without access to the props feature", %{
+      conn: conn,
+      user: user,
+      site: site
+    } do
+      ep = insert(:enterprise_plan, features: [Feature.StatsAPI], user_id: user.id)
+      insert(:subscription, user: user, paddle_plan_id: ep.paddle_plan_id)
+
+      conn =
+        get(conn, "/api/v1/stats/breakdown", %{
+          "site_id" => site.domain,
+          "property" => "visit:source",
+          "filters" => "event:props:url==whatever"
+        })
+
+      assert json_response(conn, 200)["results"]
+    end
+  end
 
   describe "param validation" do
     test "validates that property is required", %{conn: conn, site: site} do
@@ -243,8 +320,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
     assert json_response(conn, 200) == %{
              "results" => [
-               %{"utm_medium" => "Search", "visitors" => 2},
-               %{"utm_medium" => "Direct / None", "visitors" => 1}
+               %{"utm_medium" => "Search", "visitors" => 2}
              ]
            }
   end
@@ -275,8 +351,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
     assert json_response(conn, 200) == %{
              "results" => [
-               %{"utm_source" => "Google", "visitors" => 2},
-               %{"utm_source" => "Direct / None", "visitors" => 1}
+               %{"utm_source" => "Google", "visitors" => 2}
              ]
            }
   end
@@ -307,8 +382,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
     assert json_response(conn, 200) == %{
              "results" => [
-               %{"utm_campaign" => "ads", "visitors" => 2},
-               %{"utm_campaign" => "Direct / None", "visitors" => 1}
+               %{"utm_campaign" => "ads", "visitors" => 2}
              ]
            }
   end
@@ -339,8 +413,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
     assert json_response(conn, 200) == %{
              "results" => [
-               %{"utm_content" => "Content1", "visitors" => 2},
-               %{"utm_content" => "Direct / None", "visitors" => 1}
+               %{"utm_content" => "Content1", "visitors" => 2}
              ]
            }
   end
@@ -371,8 +444,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
     assert json_response(conn, 200) == %{
              "results" => [
-               %{"utm_term" => "Term1", "visitors" => 2},
-               %{"utm_term" => "Direct / None", "visitors" => 1}
+               %{"utm_term" => "Term1", "visitors" => 2}
              ]
            }
   end
@@ -522,8 +594,55 @@ defmodule PlausibleWeb.Api.ExternalStatsController.BreakdownTest do
 
     assert json_response(conn, 200) == %{
              "results" => [
-               %{"browser_version" => "56", "visitors" => 2},
-               %{"browser_version" => "57", "visitors" => 1}
+               %{"browser_version" => "56", "visitors" => 2, "browser" => "(not set)"},
+               %{"browser_version" => "57", "visitors" => 1, "browser" => "(not set)"}
+             ]
+           }
+  end
+
+  test "pageviews breakdown by event:page - imported data having pageviews=0 and visitors=n should be bypassed",
+       %{conn: conn, site: site} do
+    site =
+      site
+      |> Plausible.Site.start_import(~D[2005-01-01], Timex.today(), "Google Analytics", "ok")
+      |> Plausible.Repo.update!()
+
+    populate_stats(site, [
+      build(:pageview, pathname: "/", timestamp: ~N[2021-01-01 00:00:00]),
+      build(:pageview, pathname: "/", timestamp: ~N[2021-01-01 00:25:00]),
+      build(:pageview,
+        pathname: "/plausible.io",
+        timestamp: ~N[2021-01-01 00:00:00]
+      ),
+      build(:imported_pages,
+        page: "/skip-me",
+        date: ~D[2021-01-01],
+        visitors: 1,
+        pageviews: 0
+      ),
+      build(:imported_pages,
+        page: "/include-me",
+        date: ~D[2021-01-01],
+        visitors: 1,
+        pageviews: 1
+      )
+    ])
+
+    conn =
+      get(conn, "/api/v1/stats/breakdown", %{
+        "site_id" => site.domain,
+        "period" => "day",
+        "date" => "2021-01-01",
+        "property" => "event:page",
+        "with_imported" => "true",
+        "metrics" => "pageviews"
+      })
+
+    assert json_response(conn, 200) == %{
+             "results" => [
+               %{"page" => "/", "pageviews" => 2},
+               %{"page" => "/plausible.io", "pageviews" => 1},
+               %{"page" => "/include-me", "pageviews" => 1}
              ]
            }
   end

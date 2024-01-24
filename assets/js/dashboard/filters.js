@@ -94,8 +94,10 @@ function DropdownContent({ history, site, query, wrapped }) {
   const [addingFilter, setAddingFilter] = useState(false);
 
   if (wrapped === 0 || addingFilter) {
-    return Object.keys(FILTER_GROUPS)
-      .map((option) => filterDropdownOption(site, option))
+    let filterGroups = {...FILTER_GROUPS}
+    if (!site.propsAvailable) delete filterGroups.props
+
+    return Object.keys(filterGroups).map((option) => filterDropdownOption(site, option))
   }
 
   return (
@@ -250,11 +252,11 @@ class Filters extends React.Component {
               show={open}
               as={Fragment}
               enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
               leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
             >
               <Menu.Items
                 static

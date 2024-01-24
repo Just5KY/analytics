@@ -75,6 +75,43 @@ defmodule PlausibleWeb.Api.StatsController.PagesTest do
              ]
     end
 
+    test "returns top pages with :matches filter on custom pageview props", %{
+      conn: conn,
+      site: site
+    } do
+      populate_stats(site, [
+        build(:pageview,
+          pathname: "/1",
+          "meta.key": ["prop"],
+          "meta.value": ["bar"]
+        ),
+        build(:pageview,
+          pathname: "/2",
+          "meta.key": ["prop"],
+          "meta.value": ["foobar"]
+        ),
+        build(:pageview,
+          pathname: "/3",
+          "meta.key": ["prop"],
+          "meta.value": ["baar"]
+        ),
+        build(:pageview,
+          pathname: "/4",
+          "meta.key": ["another"],
+          "meta.value": ["bar"]
+        ),
+        build(:pageview, pathname: "/5")
+      ])
+
+      filters = Jason.encode!(%{props: %{"prop" => "~bar"}})
+      conn = get(conn, "/api/stats/#{site.domain}/pages?period=day&filters=#{filters}")
+
+      assert json_response(conn, 200) == [
+               %{"visitors" => 1, "name" => "/1"},
+               %{"visitors" => 1, "name" => "/2"}
+             ]
+    end
+
     test "calculates bounce_rate and time_on_page with :is filter on custom pageview props",
          %{conn: conn, site: site} do
       populate_stats(site, [
@@ -770,6 +807,68 @@ defmodule PlausibleWeb.Api.StatsController.PagesTest do
                  "name" => "/some-other-page"
                }
              ]
+    end
+
+    test "doesn't calculate time on page with only single page visits", %{conn: conn, site: site} do
+      populate_stats(site, [
+        build(:pageview, pathname: "/", user_id: @user_id, timestamp: ~N[2021-01-01 00:00:00]),
+        build(:pageview, pathname: "/", user_id: @user_id, timestamp: ~N[2021-01-01 00:10:00])
+      ])
+
+      assert [%{"name" => "/", "time_on_page" => nil}] =
+               conn
+               |> get("/api/stats/#{site.domain}/pages?period=day&date=2021-01-01&detailed=true")
+               |> json_response(200)
+    end
+
+    test "ignores page refresh when calculating time on page", %{conn: conn, site: site} do
+      populate_stats(site, [
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:00:00], pathname: "/"),
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:01:00], pathname: "/"),
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:02:00], pathname: "/"),
+        build(:pageview, user_id: @user_id, timestamp: ~N[2021-01-01 00:03:00], pathname: "/exit")
+      ])
+
+      assert [
+               %{"name" => "/", "time_on_page" => _three_minutes = 180.0},
+               %{"name" => "/exit", "time_on_page" => nil}
+             ] =
+               conn
+               |> get("/api/stats/#{site.domain}/pages?period=day&date=2021-01-01&detailed=true")
+               |> json_response(200)
+    end
+
+    test "calculates time on page per unique transition within session", %{conn: conn, site: site} do
+      # ┌─p──┬─p2─┬─minus(t2, t)─┬──s─┐
+      # │ /a │ /b │          100 │ s1 │
+      # │ /a │ /d │          100 │ s2 │ <- these two get treated
+      # │ /a │ /d │            0 │ s2 │ <- as single page transition
+      # └────┴────┴──────────────┴────┘
+      # so that time_on_page(a)=(100+100)/uniq(transition)=200/2=100
+
+      s1 = @user_id
+      s2 = @user_id + 1
+
+      now = ~N[2021-01-01 00:00:00]
+      later = fn seconds -> NaiveDateTime.add(now, seconds) end
+
+      populate_stats(site, [
+        build(:pageview, user_id: s1, timestamp: now, pathname: "/a"),
+        build(:pageview, user_id: s1, timestamp: later.(100), pathname: "/b"),
+        build(:pageview, user_id: s2, timestamp: now, pathname: "/a"),
+        build(:pageview, user_id: s2, timestamp: later.(100), pathname: "/d"),
+        build(:pageview, user_id: s2, timestamp: later.(100), pathname: "/a"),
+        build(:pageview, user_id: s2, timestamp: later.(100), pathname: "/d")
+      ])
+
+      assert [
+               %{"name" => "/a", "time_on_page" => 100.0},
+               %{"name" => "/b", "time_on_page" => nil},
+               %{"name" => "/d", "time_on_page" => +0.0}
+             ] =
+               conn
+               |> get("/api/stats/#{site.domain}/pages?period=day&date=2021-01-01&detailed=true")
+               |> json_response(200)
     end
 
     test "calculates bounce rate and time on page for pages with imported data", %{

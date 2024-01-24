@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from 'react-router-dom'
 import { withRouter } from 'react-router-dom'
-import Money from "../behaviours/money";
 
 import Modal from './modal'
 import * as api from '../../api'
@@ -9,6 +8,19 @@ import * as url from "../../util/url";
 import numberFormatter from '../../util/number-formatter'
 import { parseQuery } from '../../query'
 import { specialTitleWhenGoalFilter } from "../behaviours/goal-conversions";
+import { escapeFilterValue } from "../../util/filters"
+
+/*global BUILD_EXTRA*/
+/*global require*/
+function maybeRequire() {
+  if (BUILD_EXTRA) {
+    return require('../../extra/money')
+  } else {
+    return { default: null }
+  }
+}
+
+const Money = maybeRequire().default
 
 function PropsModal(props) {
   const site = props.site
@@ -51,7 +63,7 @@ function PropsModal(props) {
 
   function filterSearchLink(listItem) {
     const searchParams = new URLSearchParams(window.location.search)
-    searchParams.set('props', JSON.stringify({ [propKey]: listItem['name'] }))
+    searchParams.set('props', JSON.stringify({ [propKey]: escapeFilterValue(listItem.name) }))
     return searchParams.toString()
   }
 
@@ -80,11 +92,11 @@ function PropsModal(props) {
   }
 
   function renderBody() {
-    const hasRevenue = list.some((prop) => prop.total_revenue)
+    const hasRevenue = BUILD_EXTRA && list.some((prop) => prop.total_revenue)
 
     return (
       <>
-        <h1 className="text-xl font-bold dark:text-gray-100">{ specialTitleWhenGoalFilter(query, 'Custom Property Breakdown') }</h1>
+        <h1 className="text-xl font-bold dark:text-gray-100">{specialTitleWhenGoalFilter(query, 'Custom Property Breakdown')}</h1>
 
         <div className="my-4 border-b border-gray-300"></div>
         <main className="modal__content">

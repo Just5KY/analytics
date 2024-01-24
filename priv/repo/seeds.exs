@@ -12,9 +12,6 @@
 
 user = Plausible.Factory.insert(:user, email: "user@plausible.test", password: "plausible")
 
-FunWithFlags.enable(:funnels)
-FunWithFlags.enable(:props)
-
 native_stats_range =
   Date.range(
     Date.add(Date.utc_today(), -720),
@@ -42,14 +39,34 @@ site =
   Plausible.Factory.insert(:site,
     domain: "dummy.site",
     native_stats_start_at: NaiveDateTime.new!(native_stats_range.first, ~T[00:00:00]),
-    stats_start_date: NaiveDateTime.new!(imported_stats_range.first, ~T[00:00:00])
+    stats_start_date: NaiveDateTime.new!(imported_stats_range.first, ~T[00:00:00]),
+    memberships: [
+      Plausible.Factory.build(:site_membership, user: user, role: :owner),
+      Plausible.Factory.build(:site_membership,
+        user: Plausible.Factory.build(:user, name: "Arnold Wallaby"),
+        role: :viewer
+      )
+    ]
   )
+
+Plausible.Factory.insert(:google_auth,
+  user: user,
+  site: site,
+  property: "sc-domain:dummy.test",
+  expires: NaiveDateTime.add(NaiveDateTime.utc_now(), 3600)
+)
+
+# Plugins API: on dev environment, use "plausible-plugin-dev-seed-token" for "dummy.site" to authenticate
+seeded_token = Plausible.Plugins.API.Token.generate("seed-token")
+
+{:ok, _, _} =
+  Plausible.Plugins.API.Tokens.create(site, "plausible-plugin-dev-seed-token", seeded_token)
 
 {:ok, goal1} = Plausible.Goals.create(site, %{"page_path" => "/"})
 {:ok, goal2} = Plausible.Goals.create(site, %{"page_path" => "/register"})
 {:ok, goal3} = Plausible.Goals.create(site, %{"page_path" => "/login"})
 {:ok, goal4} = Plausible.Goals.create(site, %{"event_name" => "Purchase", "currency" => "USD"})
-{:ok, goal5} = Plausible.Goals.create(site, %{"page_path" => Enum.random(long_random_paths)})
+{:ok, _goal5} = Plausible.Goals.create(site, %{"page_path" => Enum.random(long_random_paths)})
 {:ok, outbound} = Plausible.Goals.create(site, %{"event_name" => "Outbound Link: Click"})
 
 {:ok, _funnel} =
@@ -58,8 +75,6 @@ site =
     %{"goal_id" => goal2.id},
     %{"goal_id" => goal3.id}
   ])
-
-_membership = Plausible.Factory.insert(:site_membership, user: user, site: site, role: :owner)
 
 put_random_time = fn
   date, 0 ->
@@ -208,9 +223,12 @@ native_stats_range
       operating_system: Enum.random(["Windows", "macOS", "Linux"]),
       operating_system_version: to_string(Enum.random(0..15)),
       user_id: Enum.random(1..1200),
-      "meta.key": ["url"],
+      "meta.key": ["url", "logged_in", "is_customer", "amount"],
       "meta.value": [
-        Enum.random(long_random_urls)
+        Enum.random(long_random_urls),
+        Enum.random(["true", "false"]),
+        Enum.random(["true", "false"]),
+        to_string(Enum.random(1..9000))
       ]
     ]
     |> Keyword.merge(geolocation)

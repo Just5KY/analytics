@@ -56,7 +56,6 @@ defmodule Plausible.Stats.Imported do
   # GA only has 'source'
   def merge_imported(q, _, _, "utm_source", _), do: q
 
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def merge_imported(q, site, query, property, metrics)
       when property in [
              "visit:source",
@@ -142,32 +141,30 @@ defmodule Plausible.Stats.Imported do
 
         :utm_medium ->
           imported_q
+          |> where([i], fragment("not empty(?)", i.utm_medium))
           |> select_merge([i], %{
-            utm_medium: fragment("if(empty(?), ?, ?)", i.utm_medium, @no_ref, i.utm_medium)
-          })
-
-        :utm_source ->
-          imported_q
-          |> select_merge([i], %{
-            utm_source: fragment("if(empty(?), ?, ?)", i.utm_source, @no_ref, i.utm_source)
+            utm_medium: i.utm_medium
           })
 
         :utm_campaign ->
           imported_q
+          |> where([i], fragment("not empty(?)", i.utm_campaign))
           |> select_merge([i], %{
-            utm_campaign: fragment("if(empty(?), ?, ?)", i.utm_campaign, @no_ref, i.utm_campaign)
+            utm_campaign: i.utm_campaign
           })
 
         :utm_term ->
           imported_q
+          |> where([i], fragment("not empty(?)", i.utm_term))
           |> select_merge([i], %{
-            utm_term: fragment("if(empty(?), ?, ?)", i.utm_term, @no_ref, i.utm_term)
+            utm_term: i.utm_term
           })
 
         :utm_content ->
           imported_q
+          |> where([i], fragment("not empty(?)", i.utm_content))
           |> select_merge([i], %{
-            utm_content: fragment("if(empty(?), ?, ?)", i.utm_content, @no_ref, i.utm_content)
+            utm_content: i.utm_content
           })
 
         :page ->
@@ -371,6 +368,7 @@ defmodule Plausible.Stats.Imported do
 
   defp select_imported_metrics(q, [:pageviews | rest]) do
     q
+    |> where([i], i.pageviews > 0)
     |> select_merge([i], %{pageviews: sum(i.pageviews)})
     |> select_imported_metrics(rest)
   end

@@ -3,15 +3,38 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
   use Plausible.Repo
   use Bamboo.Test
 
+  import Plausible.Test.Support.HTML
+
   setup [:create_user, :log_in]
 
   describe "GET /sites/:website/memberships/invite" do
     test "shows invite form", %{conn: conn, user: user} do
       site = insert(:site, members: [user])
 
-      conn = get(conn, "/sites/#{site.domain}/memberships/invite")
+      html =
+        conn
+        |> get("/sites/#{site.domain}/memberships/invite")
+        |> html_response(200)
 
-      assert html_response(conn, 200) =~ "Invite member to"
+      assert html =~ "Invite member to"
+      assert element_exists?(html, ~s/button[type=submit]/)
+      refute element_exists?(html, ~s/button[type=submit][disabled]/)
+    end
+
+    @tag :full_build_only
+    test "disables invite form when is over limit", %{conn: conn, user: user} do
+      memberships = [
+        build(:site_membership, user: user, role: :owner) | build_list(5, :site_membership)
+      ]
+
+      site = insert(:site, memberships: memberships)
+
+      html =
+        conn
+        |> get("/sites/#{site.domain}/memberships/invite")
+        |> html_response(200)
+
+      assert element_exists?(html, ~s/button[type=submit][disabled]/)
     end
   end
 
@@ -28,7 +51,25 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
       invitation = Repo.get_by(Plausible.Auth.Invitation, email: "john.doe@example.com")
 
       assert invitation.role == :admin
-      assert redirected_to(conn) == "/#{site.domain}/settings/people"
+      assert redirected_to(conn) == "/#{URI.encode_www_form(site.domain)}/settings/people"
+    end
+
+    @tag :full_build_only
+    test "fails to create invitation when is over limit", %{conn: conn, user: user} do
+      memberships = [
+        build(:site_membership, user: user, role: :owner) | build_list(5, :site_membership)
+      ]
+
+      site = insert(:site, memberships: memberships)
+
+      conn =
+        post(conn, "/sites/#{site.domain}/memberships/invite", %{
+          email: "john.doe@example.com",
+          role: "admin"
+        })
+
+      assert html_response(conn, 200) =~
+               "Your account is limited to 3 team members. You can upgrade your plan to increase this limit."
     end
 
     test "fails to create invitation with insufficient permissions", %{conn: conn, user: user} do
@@ -46,12 +87,12 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
     end
 
     test "fails to create invitation for a foreign site", %{conn: my_conn, user: me} do
-      my_site = insert(:site)
-      insert(:site_membership, site: my_site, user: me, role: "owner")
+      _my_site = insert(:site, memberships: [build(:site_membership, user: me, role: "owner")])
 
       other_user = insert(:user)
-      other_site = insert(:site)
-      insert(:site_membership, site: other_site, user: other_user, role: "owner")
+
+      other_site =
+        insert(:site, memberships: [build(:site_membership, user: other_user, role: "owner")])
 
       my_conn =
         post(my_conn, "/sites/#{other_site.domain}/memberships/invite", %{
@@ -95,7 +136,13 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
 
     test "renders form with error if the invitee is already a member", %{conn: conn, user: user} do
       second_member = insert(:user)
-      site = insert(:site, members: [user, second_member])
+
+      memberships = [
+        build(:site_membership, user: user, role: :owner),
+        build(:site_membership, user: second_member)
+      ]
+
+      site = insert(:site, memberships: memberships)
 
       conn =
         post(conn, "/sites/#{site.domain}/memberships/invite", %{
@@ -169,7 +216,7 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
       invitation = Repo.get_by(Plausible.Auth.Invitation, email: "john.doe@example.com")
 
       assert invitation.role == :owner
-      assert redirected_to(conn) == "/#{site.domain}/settings/people"
+      assert redirected_to(conn) == "/#{URI.encode_www_form(site.domain)}/settings/people"
     end
 
     test "sends ownership transfer email for new user", %{conn: conn, user: user} do
@@ -271,7 +318,7 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
       membership = Repo.reload!(membership)
 
       assert membership.role == :viewer
-      assert redirected_to(conn) == "/#{site.domain}"
+      assert redirected_to(conn) == "/#{URI.encode_www_form(site.domain)}"
     end
 
     test "owner cannot make anyone else owner", %{
@@ -339,7 +386,7 @@ defmodule PlausibleWeb.Site.MembershipControllerTest do
       viewer_membership = Repo.reload!(viewer_membership)
 
       assert viewer_membership.role == :admin
-      assert redirected_to(conn) == "/#{site.domain}/settings/people"
+      assert redirected_to(conn) == "/#{URI.encode_www_form(site.domain)}/settings/people"
     end
 
     test "admin can't make themselves an owner", %{conn: conn, user: user} do

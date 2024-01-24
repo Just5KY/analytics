@@ -1,11 +1,24 @@
-import "../css/app.css"
-import "flatpickr/dist/flatpickr.min.css"
 import "./polyfills/closest"
 import 'abortcontroller-polyfill/dist/polyfill-patch-fetch'
-import 'alpinejs'
+import Alpine from 'alpinejs'
 import "./liveview/live_socket"
-import "./liveview/suggestions_dropdown"
+import comboBox from "./liveview/combo-box"
+import dropdown from "./liveview/dropdown"
 import "./liveview/phx_events"
+
+Alpine.data('dropdown', dropdown)
+Alpine.data('comboBox', comboBox)
+Alpine.start()
+
+if (document.querySelectorAll('[data-modal]').length > 0) {
+  window.addEventListener(`phx:close-modal`, (e) => {
+    document
+      .getElementById(e.detail.id)
+      .dispatchEvent(
+        new CustomEvent('close-modal', { bubbles: true, detail: e.detail.id })
+      )
+  })
+}
 
 const triggers = document.querySelectorAll('[data-dropdown-trigger]')
 
@@ -33,25 +46,6 @@ if (triggers.length > 0) {
         dropdown.classList.add('hidden')
       }
     }
-  })
-}
-
-const registerForm = document.getElementById('register-form')
-
-if (registerForm) {
-  registerForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    setTimeout(submitForm, 1000);
-    var formSubmitted = false;
-
-    function submitForm() {
-      if (!formSubmitted) {
-        formSubmitted = true;
-        registerForm.submit();
-      }
-    }
-    /* eslint-disable-next-line no-undef */
-    plausible('Signup', { callback: submitForm });
   })
 }
 

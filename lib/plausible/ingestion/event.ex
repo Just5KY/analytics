@@ -5,6 +5,7 @@ defmodule Plausible.Ingestion.Event do
   are uniformly either buffered in batches (to Clickhouse) or dropped
   (e.g. due to spam blocklist) from the processing pipeline.
   """
+  use Plausible
   alias Plausible.Ingestion.Request
   alias Plausible.ClickhouseEventV2
   alias Plausible.Site.GateKeeper
@@ -24,6 +25,7 @@ defmodule Plausible.Ingestion.Event do
           | :spam_referrer
           | GateKeeper.policy()
           | :invalid
+          | :dc_ip
 
   @type t() :: %__MODULE__{
           domain: String.t() | nil,
@@ -92,6 +94,7 @@ defmodule Plausible.Ingestion.Event do
 
   defp pipeline() do
     [
+      &put_ip_classification/1,
       &put_user_agent/1,
       &put_basic_info/1,
       &put_referrer/1,
@@ -136,6 +139,16 @@ defmodule Plausible.Ingestion.Event do
 
   defp update_attrs(%__MODULE__{} = event, %{} = attrs) do
     struct!(event, clickhouse_event_attrs: Map.merge(event.clickhouse_event_attrs, attrs))
+  end
+
+  defp put_ip_classification(%__MODULE__{} = event) do
+    case event.request.ip_classification do
+      "dc_ip" ->
+        drop(event, :dc_ip)
+
+      _any ->
+        event
+    end
   end
 
   defp put_user_agent(%__MODULE__{} = event) do
@@ -199,43 +212,25 @@ defmodule Plausible.Ingestion.Event do
   end
 
   defp put_props(%__MODULE__{request: %{props: %{} = props}} = event) do
+    # defensive: ensuring the keys/values are always in the same order
+    {keys, values} = Enum.unzip(props)
+
     update_attrs(event, %{
-      "meta.key": Map.keys(props),
-      "meta.value": Enum.map(props, fn {_, v} -> to_string(v) end)
+      "meta.key": keys,
+      "meta.value": values
     })
   end
 
   defp put_props(%__MODULE__{} = event), do: event
 
-  defp put_revenue(%__MODULE__{request: %{revenue_source: %Money{} = revenue_source}} = event) do
-    matching_goal =
-      Enum.find(event.site.revenue_goals, &(&1.event_name == event.clickhouse_event_attrs.name))
-
-    cond do
-      is_nil(matching_goal) ->
-        event
-
-      matching_goal.currency == revenue_source.currency ->
-        update_attrs(event, %{
-          revenue_source_amount: Money.to_decimal(revenue_source),
-          revenue_source_currency: to_string(revenue_source.currency),
-          revenue_reporting_amount: Money.to_decimal(revenue_source),
-          revenue_reporting_currency: to_string(revenue_source.currency)
-        })
-
-      matching_goal.currency != revenue_source.currency ->
-        converted = Money.to_currency!(revenue_source, matching_goal.currency)
-
-        update_attrs(event, %{
-          revenue_source_amount: Money.to_decimal(revenue_source),
-          revenue_source_currency: to_string(revenue_source.currency),
-          revenue_reporting_amount: Money.to_decimal(converted),
-          revenue_reporting_currency: to_string(converted.currency)
-        })
+  defp put_revenue(event) do
+    on_full_build do
+      attrs = Plausible.Ingestion.Event.Revenue.get_revenue_attrs(event)
+      update_attrs(event, attrs)
+    else
+      event
     end
   end
-
-  defp put_revenue(event), do: event
 
   defp put_salts(%__MODULE__{} = event) do
     %{event | salts: Plausible.Session.Salts.fetch()}
@@ -360,7 +355,7 @@ defmodule Plausible.Ingestion.Event do
   @tablet_types ["car browser", "tablet"]
   @desktop_types ["tv", "console", "desktop"]
   alias UAInspector.Result.Device
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+
   defp screen_size(ua) do
     case ua.device do
       %Device{type: t} when t in @mobile_types ->
@@ -371,6 +366,9 @@ defmodule Plausible.Ingestion.Event do
 
       %Device{type: t} when t in @desktop_types ->
         "Desktop"
+
+      %Device{type: :unknown} ->
+        nil
 
       %Device{type: type} ->
         Sentry.capture_message("Could not determine device type from UAInspector",
@@ -438,9 +436,12 @@ defmodule Plausible.Ingestion.Event do
   defp get_root_domain(nil), do: "(none)"
 
   defp get_root_domain(hostname) do
-    case PublicSuffix.registrable_domain(hostname) do
-      domain when is_binary(domain) -> domain
-      _any -> hostname
+    case :inet.parse_ipv4_address(String.to_charlist(hostname)) do
+      {:ok, _} ->
+        hostname
+
+      {:error, :einval} ->
+        PublicSuffix.registrable_domain(hostname) || hostname
     end
   end
 

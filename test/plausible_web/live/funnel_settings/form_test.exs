@@ -1,5 +1,7 @@
 defmodule PlausibleWeb.Live.FunnelSettings.FormTest do
   use PlausibleWeb.ConnCase, async: true
+  @moduletag :full_build_only
+
   import Phoenix.LiveViewTest
   import Plausible.Test.Support.HTML
 
@@ -12,11 +14,11 @@ defmodule PlausibleWeb.Live.FunnelSettings.FormTest do
 
       doc = type_into_combo(lv, 1, "hello")
 
-      assert text_of_element(doc, "#dropdown-step-1-option-0") == "Hello World"
+      assert text_of_element(doc, "#dropdown-step-1-option-1") == "Hello World"
 
       doc = type_into_combo(lv, 1, "plausible")
 
-      assert text_of_element(doc, "#dropdown-step-1-option-0") == "Plausible"
+      assert text_of_element(doc, "#dropdown-step-1-option-1") == "Plausible"
     end
 
     test "selecting an option prefills input values", %{conn: conn, site: site} do
@@ -29,7 +31,7 @@ defmodule PlausibleWeb.Live.FunnelSettings.FormTest do
       refute element_exists?(doc, ~s/input[type="text"][value="Another World"]/)
 
       lv
-      |> element("li#dropdown-step-1-option-0 a")
+      |> element("li#dropdown-step-1-option-1 a")
       |> render_click()
 
       assert lv
@@ -50,7 +52,7 @@ defmodule PlausibleWeb.Live.FunnelSettings.FormTest do
       type_into_combo(lv, 1, "another")
 
       lv
-      |> element("li#dropdown-step-1-option-0 a")
+      |> element("li#dropdown-step-1-option-1 a")
       |> render_click()
 
       doc = type_into_combo(lv, 2, "another")
@@ -65,11 +67,11 @@ defmodule PlausibleWeb.Live.FunnelSettings.FormTest do
 
       doc =
         lv
-        |> element("li#dropdown-step-1-option-0 a")
+        |> element("li#dropdown-step-1-option-1 a")
         |> render_click()
 
-      assert element_exists?(doc, ~s/#li#dropdown-step-1-option-14/)
-      refute element_exists?(doc, ~s/#li#dropdown-step-1-option-15/)
+      assert element_exists?(doc, ~s/#li#dropdown-step-1-option-15/)
+      refute element_exists?(doc, ~s/#li#dropdown-step-1-option-16/)
     end
 
     test "removing one option alters suggestions for other", %{conn: conn, site: site} do
@@ -82,12 +84,12 @@ defmodule PlausibleWeb.Live.FunnelSettings.FormTest do
       type_into_combo(lv, 2, "hello")
 
       lv
-      |> element("li#dropdown-step-2-option-0 a")
+      |> element("li#dropdown-step-2-option-1 a")
       |> render_click()
 
       doc = type_into_combo(lv, 1, "hello")
 
-      refute text_of_element(doc, "ul#dropdown-step-1 li") =~ "Hello World"
+      refute text_of_element(doc, "ul#dropdown-step-0 li") =~ "Hello World"
 
       lv |> element(~s/#remove-step-2/) |> render_click()
 

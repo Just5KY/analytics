@@ -34,7 +34,25 @@ defmodule Plausible.Site.CacheTest do
         )
 
       %{id: first_id} = site1 = insert(:site, domain: "site1.example.com")
-      _ = insert(:site, domain: "site2.example.com")
+
+      _ =
+        insert(:site,
+          domain: "site2.example.com",
+          memberships: [
+            build(:site_membership,
+              user: build(:user, accept_traffic_until: ~D[2022-01-01]),
+              role: :viewer
+            ),
+            build(:site_membership,
+              user: build(:user, accept_traffic_until: ~D[2021-01-01]),
+              role: :owner
+            ),
+            build(:site_membership,
+              user: build(:user, accept_traffic_until: ~D[2020-01-01]),
+              role: :admin
+            )
+          ]
+        )
 
       :ok = Cache.refresh_all(cache_name: test)
 
@@ -48,11 +66,13 @@ defmodule Plausible.Site.CacheTest do
       assert %Site{from_cache?: true} =
                Cache.get("site2.example.com", force?: true, cache_name: test)
 
-      assert %Site{from_cache?: false} = Cache.get("site2.example.com", cache_name: test)
+      assert %Site{from_cache?: false, owner: %{accept_traffic_until: ~D[2021-01-01]}} =
+               Cache.get("site2.example.com", cache_name: test)
 
       refute Cache.get("site3.example.com", cache_name: test, force?: true)
     end
 
+    @tag :full_build_only
     test "cache caches revenue goals", %{test: test} do
       {:ok, _} =
         Supervisor.start_link(
@@ -84,6 +104,7 @@ defmodule Plausible.Site.CacheTest do
              ] = Enum.sort_by(cached_goals, & &1.event_name)
     end
 
+    @tag :full_build_only
     test "cache caches revenue goals with event refresh", %{test: test} do
       {:ok, _} =
         Supervisor.start_link(
@@ -96,8 +117,12 @@ defmodule Plausible.Site.CacheTest do
 
       # the site was added yesterday so full refresh will pick it up
       %{id: site_id} = site = insert(:site, domain: "site1.example.com", updated_at: yesterday)
+
       # the goal was added yesterday so full refresh will pick it up
-      Plausible.Goals.create(site, %{"event_name" => "Purchase", "currency" => :BRL}, yesterday)
+      Plausible.Goals.create(site, %{"event_name" => "Purchase", "currency" => :BRL},
+        now: yesterday
+      )
+
       # this goal is added "just now"
       Plausible.Goals.create(site, %{"event_name" => "Add to Cart", "currency" => :USD})
       # and this one does not matter
@@ -110,7 +135,7 @@ defmodule Plausible.Site.CacheTest do
       Plausible.Goals.create(
         site,
         %{"event_name" => "Purchase2", "currency" => :BRL},
-        DateTime.add(DateTime.utc_now(), -70)
+        now: DateTime.add(DateTime.utc_now(), -70)
       )
 
       :ok = Cache.refresh_updated_recently(cache_name: test)
@@ -379,6 +404,7 @@ defmodule Plausible.Site.CacheTest do
     @items1 for i <- 1..200_000, do: {i, nil, :batch1}
     @items2 for _ <- 1..200_000, do: {Enum.random(1..400_000), nil, :batch2}
     @max_seconds 2
+    @tag :slow
     test "merging large sets is expected to be under #{@max_seconds} seconds", %{test: test} do
       {:ok, _} = start_test_cache(test)
 

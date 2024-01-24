@@ -1,16 +1,51 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## Unreleased
-
+### Added
+- Allow filtering with `contains`/`matches` operator for custom properties
 - Add `referrers.csv` to CSV export
+- Add a new Properties section in the dashboard to break down by custom properties
+- Add `custom_props.csv` to CSV export (almost the same as the old `prop_breakdown.csv`, but has different column headers, and includes props for pageviews too, not only custom events)
+- Add `referrers.csv` to CSV export
+- Improve password validation in registration and password reset forms
+- Adds Gravatar profile image to navbar
+- Enforce email reverification on update
+- Add Plugins API Tokens provisioning UI
+- Add searching sites by domain in /sites view
+- Add last 24h plots to /sites view
+- Add site pinning to /sites view
+- Add support for JSON logger, via LOG_FORMAT=json environment variable
+- Add support for 2FA authentication
+- Add 'browser_versions.csv' to CSV export
+- Add `CLICKHOUSE_MAX_BUFFER_SIZE_BYTES` env var which defaults to `100000` (100KB)
+
+### Removed
+- Removed the nested custom event property breakdown UI when filtering by a goal in Goal Conversions
+- Removed the `prop-breakdown.csv` file from CSV export
+- Deprecated `CLICKHOUSE_MAX_BUFFER_SIZE`
+
+### Changed
+- Limit the number of Goal Conversions shown on the dashboard and render a "Details" link when there are more entries to show
+- Show Outbound Links / File Downloads / 404 Pages / Cloaked Links instead of Goal Conversions when filtering by the corresponding goal
+- Require custom properties to be explicitly added from Site Settings > Custom Properties in order for them to show up on the dashboard
+- GA/SC sections moved to new settings: Integrations
+- Replace `CLICKHOUSE_MAX_BUFFER_SIZE` with `CLICKHOUSE_MAX_BUFFER_SIZE_BYTES`
+
 ### Fixed
+- Stop returning custom events in goal breakdown with a pageview goal filter and vice versa
 - Only return `(none)` values in custom property breakdown for the first page (pagination) of results
 - Fixed weekly/monthly e-mail report [rendering issues](https://github.com/plausible/analytics/issues/284)
+- Fix [broken interval selection](https://github.com/plausible/analytics/issues/2982) in the all time view plausible/analytics#3110
 - Fixed [IPv6 problems](https://github.com/plausible/analytics/issues/3173) in data migration plausible/analytics#3179
 - Fixed [long URLs display](https://github.com/plausible/analytics/issues/3158) in Outbound Link breakdown view
 - Fixed [Sentry reports](https://github.com/plausible/analytics/discussions/3166) for ingestion requests plausible/analytics#3182
 - Fix breakdown pagination bug in the dashboard details view when filtering by goals
+- Update bot detection (matomo 6.1.4, ua_inspector 3.4.0)
+- Improved the Goal Settings page (search, autcompletion etc.)
+- Log mailer errors plausible/analytics#3336
+- Allow custom event timeseries in stats API plausible/analytics#3505
+- Fixes for sites with UTF characters in domain plausible/analytics#3560
+- Fix crash when using special characters in filter plausible/analytics#3634
 
 ## v2.0.0 - 2023-07-12
 
@@ -46,7 +81,6 @@ All notable changes to this project will be documented in this file.
 - Fix bug when using multiple [wildcard goal filters](https://github.com/plausible/analytics/pull/3015)
 - Fix a bug where realtime would fail with imported data
 - Fix a bug where the country name was not shown when [filtering through the map](https://github.com/plausible/analytics/issues/3086)
-- Fix [broken interval selection](https://github.com/plausible/analytics/issues/3086) in the all time view
 
 ### Changed
 - Treat page filter as entry page filter for `bounce_rate`

@@ -10,16 +10,31 @@ defmodule PlausibleWeb.Live.Components.ComboBox.StaticSearch do
   """
 
   @spec suggest(String.t(), [{any(), any()}]) :: [{any(), any()}]
-  def suggest(input, options) do
-    options
-    |> Enum.map(fn {_, value} = option -> {option, weight(value, input)} end)
-    |> Enum.reject(fn {_option, weight} -> weight < 0.6 end)
-    |> Enum.sort_by(fn {_option, weight} -> weight end, :desc)
-    |> Enum.map(fn {option, _weight} -> option end)
+  def suggest(input, choices, opts \\ []) do
+    input = String.trim(input)
+
+    if input != "" do
+      weight_threshold = Keyword.get(opts, :weight_threshold, 0.6)
+
+      choices
+      |> Enum.map(fn
+        {_, value} = choice ->
+          {choice, weight(value, input, opts)}
+
+        value ->
+          {value, weight(value, input, opts)}
+      end)
+      |> Enum.reject(fn {_choice, weight} -> weight < weight_threshold end)
+      |> Enum.sort_by(fn {_choice, weight} -> weight end, :desc)
+      |> Enum.map(fn {choice, _weight} -> choice end)
+    else
+      choices
+    end
   end
 
-  defp weight(value, input) do
-    value = to_string(value)
+  defp weight(value, input, opts) do
+    to_str = Keyword.get(opts, :to_string, &to_string/1)
+    value = to_str.(value)
 
     case {value, input} do
       {value, input} when value == input ->

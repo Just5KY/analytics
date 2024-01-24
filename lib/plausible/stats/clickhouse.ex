@@ -1,8 +1,14 @@
 defmodule Plausible.Stats.Clickhouse do
+  use Plausible
   use Plausible.Repo
   use Plausible.ClickhouseRepo
-  alias Plausible.Stats.Query
   use Plausible.Stats.Fragments
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Plausible.Stats.Query
+  alias Plausible.Timezones
+
   @no_ref "Direct / None"
 
   @spec pageview_start_date_local(Plausible.Site.t()) :: Date.t() | nil
@@ -22,9 +28,7 @@ defmodule Plausible.Stats.Clickhouse do
         nil
 
       _ ->
-        Timex.Timezone.convert(datetime, "UTC")
-        |> Timex.Timezone.convert(site.timezone)
-        |> DateTime.to_date()
+        Timezones.to_date_in_timezone(datetime, site.timezone)
     end
   end
 
@@ -35,16 +39,6 @@ defmodule Plausible.Stats.Clickhouse do
         select: sum(i.pageviews)
       )
     )
-  end
-
-  def usage_breakdown(domains_or_site_ids) do
-    range =
-      Date.range(
-        Timex.shift(Timex.today(), days: -30),
-        Timex.today()
-      )
-
-    usage_breakdown(domains_or_site_ids, range)
   end
 
   def usage_breakdown([d | _] = domains, date_range) when is_binary(d) do
@@ -194,35 +188,129 @@ defmodule Plausible.Stats.Clickhouse do
     )
   end
 
-  def last_24h_visitors([]), do: %{}
-
-  def last_24h_visitors(sites) do
-    site_id_to_domain_mapping = for site <- sites, do: {site.id, site.domain}, into: %{}
-
-    ClickhouseRepo.all(
-      from(e in "events_v2",
-        group_by: e.site_id,
-        where: e.site_id in ^Map.keys(site_id_to_domain_mapping),
-        where: e.timestamp > fragment("now() - INTERVAL 24 HOUR"),
-        select: {e.site_id, fragment("uniq(user_id)")}
-      )
-    )
-    |> Enum.map(fn {site_id, user_id} ->
-      {site_id_to_domain_mapping[site_id], user_id}
+  @spec empty_24h_visitors_hourly_intervals([Plausible.Site.t()], NaiveDateTime.t()) :: map()
+  def empty_24h_visitors_hourly_intervals(sites, now \\ NaiveDateTime.utc_now()) do
+    sites
+    |> Enum.map(fn site ->
+      {site.domain,
+       %{
+         intervals: empty_24h_intervals(now),
+         visitors: 0,
+         change: 0
+       }}
     end)
-    |> Enum.into(%{})
+    |> Map.new()
   end
 
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
+  @spec last_24h_visitors_hourly_intervals([Plausible.Site.t()], NaiveDateTime.t()) :: map()
+  def last_24h_visitors_hourly_intervals(sites, now \\ NaiveDateTime.utc_now())
+  def last_24h_visitors_hourly_intervals([], _), do: %{}
+
+  def last_24h_visitors_hourly_intervals(sites, now) do
+    site_id_to_domain_mapping = for site <- sites, do: {site.id, site.domain}, into: %{}
+    now = now |> NaiveDateTime.truncate(:second)
+
+    placeholder = empty_24h_visitors_hourly_intervals(sites, now)
+
+    previous_query = visitors_24h_total(now, -48, -24, site_id_to_domain_mapping)
+
+    previous_result =
+      previous_query
+      |> ClickhouseRepo.all()
+      |> Enum.reduce(%{}, fn
+        %{total_visitors: total, site_id: site_id}, acc -> Map.put_new(acc, site_id, total)
+      end)
+
+    total_q = visitors_24h_total(now, -24, 0, site_id_to_domain_mapping)
+
+    current_q =
+      from(
+        e in "events_v2",
+        join: total_q in subquery(total_q),
+        on: e.site_id == total_q.site_id,
+        where: e.site_id in ^Map.keys(site_id_to_domain_mapping),
+        where: e.timestamp >= ^NaiveDateTime.add(now, -24, :hour),
+        where: e.timestamp <= ^now,
+        select: %{
+          site_id: e.site_id,
+          interval: fragment("toStartOfHour(timestamp)"),
+          visitors: uniq(e.user_id),
+          total: fragment("any(total_visitors)")
+        },
+        group_by: [e.site_id, fragment("toStartOfHour(timestamp)")],
+        order_by: [e.site_id, fragment("toStartOfHour(timestamp)")]
+      )
+
+    on_full_build do
+      current_q = Plausible.Stats.Sampling.add_query_hint(current_q)
+    end
+
+    result =
+      current_q
+      |> ClickhouseRepo.all()
+      |> Enum.group_by(& &1.site_id)
+      |> Enum.map(fn {site_id, entries} ->
+        %{total: visitors} = List.first(entries)
+
+        full_entries =
+          (entries ++ empty_24h_intervals(now))
+          |> Enum.uniq_by(& &1.interval)
+          |> Enum.sort_by(& &1.interval, NaiveDateTime)
+
+        change = Plausible.Stats.Compare.percent_change(previous_result[site_id], visitors) || 100
+
+        {site_id_to_domain_mapping[site_id],
+         %{intervals: full_entries, visitors: visitors, change: change}}
+      end)
+      |> Map.new()
+
+    Map.merge(placeholder, result)
+  end
+
+  defp visitors_24h_total(now, offset1, offset2, site_id_to_domain_mapping) do
+    query =
+      from e in "events_v2",
+        where: e.site_id in ^Map.keys(site_id_to_domain_mapping),
+        where: e.timestamp >= ^NaiveDateTime.add(now, offset1, :hour),
+        where: e.timestamp <= ^NaiveDateTime.add(now, offset2, :hour),
+        select: %{
+          site_id: e.site_id,
+          total_visitors: fragment("toUInt64(round(uniq(user_id) * any(_sample_factor)))")
+        },
+        group_by: [e.site_id]
+
+    on_full_build do
+      query = Plausible.Stats.Sampling.add_query_hint(query)
+    end
+
+    query
+  end
+
+  defp empty_24h_intervals(now) do
+    first = NaiveDateTime.add(now, -23, :hour)
+    {:ok, time} = Time.new(first.hour, 0, 0)
+    first = NaiveDateTime.new!(NaiveDateTime.to_date(first), time)
+
+    for offset <- 0..24 do
+      %{
+        interval: NaiveDateTime.add(first, offset, :hour),
+        visitors: 0
+      }
+    end
+  end
+
   defp base_session_query(site, query) do
     {first_datetime, last_datetime} = utc_boundaries(query, site)
 
     q =
       from(s in "sessions_v2",
-        hints: ["SAMPLE 10000000"],
         where: s.site_id == ^site.id,
         where: s.timestamp >= ^first_datetime and s.start < ^last_datetime
       )
+
+    on_full_build do
+      q = Plausible.Stats.Sampling.add_query_hint(q, 10_000_000)
+    end
 
     q =
       if query.filters["source"] do
@@ -333,16 +421,18 @@ defmodule Plausible.Stats.Clickhouse do
     end
   end
 
-  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   defp base_query_bare(site, query) do
     {first_datetime, last_datetime} = utc_boundaries(query, site)
 
     q =
       from(e in "events_v2",
-        hints: ["SAMPLE 10000000"],
         where: e.site_id == ^site.id,
         where: e.timestamp >= ^first_datetime and e.timestamp < ^last_datetime
       )
+
+    on_full_build do
+      q = Plausible.Stats.Sampling.add_query_hint(q, 10_000_000)
+    end
 
     q =
       if query.filters["screen"] do
@@ -448,13 +538,12 @@ defmodule Plausible.Stats.Clickhouse do
       if val == "(none)" do
         from(
           e in q,
-          where: fragment("not has(meta.key, ?)", ^key)
+          where: not has_key(e, :meta, ^key)
         )
       else
         from(
           e in q,
-          array_join: meta in fragment("meta"),
-          where: meta.key == ^key and meta.value == ^val
+          where: has_key(e, :meta, ^key) and get_by_key(e, :meta, ^key) == ^val
         )
       end
     else
@@ -494,15 +583,14 @@ defmodule Plausible.Stats.Clickhouse do
     {:ok, first} = NaiveDateTime.new(date_range.first, ~T[00:00:00])
 
     first_datetime =
-      Timex.to_datetime(first, site.timezone)
-      |> Timex.Timezone.convert("UTC")
+      first
+      |> Timezones.to_utc_datetime(site.timezone)
       |> beginning_of_time(site.native_stats_start_at)
 
     {:ok, last} = NaiveDateTime.new(date_range.last |> Timex.shift(days: 1), ~T[00:00:00])
 
     last_datetime =
-      Timex.to_datetime(last, site.timezone)
-      |> Timex.Timezone.convert("UTC")
+      Timezones.to_utc_datetime(last, site.timezone)
 
     {first_datetime, last_datetime}
   end

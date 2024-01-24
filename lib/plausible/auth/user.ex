@@ -11,12 +11,17 @@ defimpl FunWithFlags.Actor, for: Plausible.Auth.User do
 end
 
 defmodule Plausible.Auth.User do
+  use Plausible
   use Ecto.Schema
   import Ecto.Changeset
 
   @type t() :: %__MODULE__{}
 
-  @required [:email, :name, :password, :password_confirmation]
+  @required [:email, :name, :password]
+
+  @trial_accept_traffic_until_offset_days 14
+  @susbscription_accept_traffic_until_offset_days 30
+
   schema "users" do
     field :email, :string
     field :password_hash
@@ -25,8 +30,21 @@ defmodule Plausible.Auth.User do
     field :name, :string
     field :last_seen, :naive_datetime
     field :trial_expiry_date, :date
-    field :theme, :string
+    field :theme, Ecto.Enum, values: [:system, :light, :dark]
     field :email_verified, :boolean
+    field :previous_email, :string
+    field :accept_traffic_until, :date
+
+    # A field only used as a manual override - allow subscribing
+    # to any plan, even when exceeding its pageview limit
+    field :allow_next_upgrade_override, :boolean
+
+    # Fields for TOTP authentication. See `Plausible.Auth.TOTP`.
+    field :totp_enabled, :boolean, default: false
+    field :totp_secret, Plausible.Auth.TOTP.EncryptedBinary
+    field :totp_token, :string
+    field :totp_last_used_at, :naive_datetime
+
     embeds_one :grace_period, Plausible.Auth.GracePeriod, on_replace: :update
 
     has_many :site_memberships, Plausible.Site.Membership
@@ -43,30 +61,86 @@ defmodule Plausible.Auth.User do
     %Plausible.Auth.User{}
     |> cast(attrs, @required)
     |> validate_required(@required)
-    |> validate_length(:password, min: 6, message: "has to be at least 6 characters")
-    |> validate_length(:password, max: 64, message: "cannot be longer than 64 characters")
-    |> validate_confirmation(:password)
+    |> validate_length(:password, min: 12, message: "has to be at least 12 characters")
+    |> validate_length(:password, max: 128, message: "cannot be longer than 128 characters")
+    |> validate_confirmation(:password, required: true)
+    |> validate_password_strength()
     |> hash_password()
-    |> start_trial
-    |> set_email_verified
+    |> start_trial()
+    |> set_email_verification_status()
     |> unique_constraint(:email)
+  end
+
+  def settings_changeset(user, attrs \\ %{}) do
+    user
+    |> cast(attrs, [:email, :name, :theme])
+    |> validate_required([:email, :name, :theme])
+    |> unique_constraint(:email)
+  end
+
+  def email_changeset(user, attrs \\ %{}) do
+    user
+    |> cast(attrs, [:email, :password])
+    |> validate_required([:email, :password])
+    |> validate_email_changed()
+    |> check_password()
+    |> unique_constraint(:email)
+    |> set_email_verification_status()
+    |> put_change(:previous_email, user.email)
+  end
+
+  def cancel_email_changeset(user) do
+    if user.previous_email do
+      user
+      |> change()
+      |> unique_constraint(:email)
+      |> put_change(:email_verified, true)
+      |> put_change(:email, user.previous_email)
+      |> put_change(:previous_email, nil)
+    else
+      # It shouldn't happen under normal circumstances
+      raise "Previous email is empty for user #{user.id} (#{user.email}) when it shouldn't."
+    end
   end
 
   def changeset(user, attrs \\ %{}) do
     user
-    |> cast(attrs, [:email, :name, :email_verified, :theme, :trial_expiry_date])
+    |> cast(attrs, [
+      :email,
+      :name,
+      :email_verified,
+      :theme,
+      :trial_expiry_date,
+      :allow_next_upgrade_override,
+      :accept_traffic_until
+    ])
     |> validate_required([:email, :name, :email_verified])
+    |> maybe_bump_accept_traffic_until()
     |> unique_constraint(:email)
   end
 
-  def set_password(user, password) do
-    hash = Plausible.Auth.Password.hash(password)
+  defp maybe_bump_accept_traffic_until(changeset) do
+    expiry_change = get_change(changeset, :trial_expiry_date)
 
+    if expiry_change do
+      put_change(
+        changeset,
+        :accept_traffic_until,
+        Date.add(expiry_change, @trial_accept_traffic_until_offset_days)
+      )
+    else
+      changeset
+    end
+  end
+
+  def set_password(user, password) do
     user
     |> cast(%{password: password}, [:password])
-    |> validate_required(:password)
-    |> validate_length(:password, min: 6, message: "has to be at least 6 characters")
-    |> cast(%{password_hash: hash}, [:password_hash])
+    |> validate_required([:password])
+    |> validate_length(:password, min: 12, message: "has to be at least 12 characters")
+    |> validate_length(:password, max: 128, message: "cannot be longer than 128 characters")
+    |> validate_password_strength()
+    |> hash_password()
   end
 
   def hash_password(%{errors: [], changes: changes} = changeset) do
@@ -81,26 +155,117 @@ defmodule Plausible.Auth.User do
   end
 
   def start_trial(user) do
-    change(user, trial_expiry_date: trial_expiry())
+    trial_expiry = trial_expiry()
+
+    change(user,
+      trial_expiry_date: trial_expiry,
+      accept_traffic_until: Date.add(trial_expiry, @trial_accept_traffic_until_offset_days)
+    )
   end
 
   def end_trial(user) do
     change(user, trial_expiry_date: Timex.today() |> Timex.shift(days: -1))
   end
 
-  defp trial_expiry() do
-    if Application.get_env(:plausible, :is_selfhost) do
-      Timex.today() |> Timex.shift(years: 100)
+  def password_strength(changeset) do
+    case get_field(changeset, :password) do
+      nil ->
+        %{suggestions: [], warning: "", score: 0}
+
+      # Passwords past (approximately) 32 characters are treated
+      # as strong, despite what they contain, to avoid unnecessarily
+      # expensive computation.
+      password when byte_size(password) > 32 ->
+        %{suggestions: [], warning: "", score: 4}
+
+      password ->
+        existing_phrases =
+          []
+          |> maybe_add_phrase(get_field(changeset, :name))
+          |> maybe_add_phrase(get_field(changeset, :email))
+
+        case ZXCVBN.zxcvbn(password, existing_phrases) do
+          %{score: score, feedback: feedback} ->
+            %{suggestions: feedback.suggestions, warning: feedback.warning, score: score}
+
+          :error ->
+            %{suggestions: [], warning: "", score: 3}
+        end
+    end
+  catch
+    _kind, _value ->
+      %{suggestions: [], warning: "", score: 3}
+  end
+
+  def profile_img_url(%__MODULE__{email: email}) do
+    hash =
+      email
+      |> String.trim()
+      |> String.downcase()
+      |> :erlang.md5()
+      |> Base.encode16(case: :lower)
+
+    Path.join(PlausibleWeb.Endpoint.url(), ["avatar/", hash])
+  end
+
+  def trial_accept_traffic_until_offset_days(), do: @trial_accept_traffic_until_offset_days
+
+  def subscription_accept_traffic_until_offset_days(),
+    do: @susbscription_accept_traffic_until_offset_days
+
+  defp validate_email_changed(changeset) do
+    if !get_change(changeset, :email) && !changeset.errors[:email] do
+      add_error(changeset, :email, "can't be the same", validation: :different_email)
     else
-      Timex.today() |> Timex.shift(days: 30)
+      changeset
     end
   end
 
-  defp set_email_verified(user) do
-    if Keyword.fetch!(Application.get_env(:plausible, :selfhost), :enable_email_verification) do
+  defp check_password(changeset) do
+    if password = get_change(changeset, :password) do
+      if Plausible.Auth.Password.match?(password, changeset.data.password_hash) do
+        changeset
+      else
+        add_error(changeset, :password, "is invalid", validation: :check_password)
+      end
+    else
+      changeset
+    end
+  end
+
+  defp validate_password_strength(changeset) do
+    if get_change(changeset, :password) != nil and password_strength(changeset).score <= 2 do
+      add_error(changeset, :password, "is too weak", validation: :strength)
+    else
+      changeset
+    end
+  end
+
+  defp maybe_add_phrase(phrases, nil), do: phrases
+
+  defp maybe_add_phrase(phrases, phrase) do
+    parts = String.split(phrase)
+
+    [phrase, parts]
+    |> List.flatten(phrases)
+    |> Enum.uniq()
+  end
+
+  defp trial_expiry() do
+    on_full_build do
+      Timex.today() |> Timex.shift(days: 30)
+    else
+      Timex.today() |> Timex.shift(years: 100)
+    end
+  end
+
+  defp set_email_verification_status(user) do
+    on_full_build do
       change(user, email_verified: false)
     else
-      change(user, email_verified: true)
+      selfhosted_config = Application.get_env(:plausible, :selfhost)
+      must_verify? = Keyword.fetch!(selfhosted_config, :enable_email_verification)
+      change(user, email_verified: not must_verify?)
     end
   end
 end

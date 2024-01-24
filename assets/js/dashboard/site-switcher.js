@@ -131,7 +131,7 @@ export default class SiteSwitcher extends React.Component {
       domain === this.props.site.domain
         ? 'font-medium text-gray-900 dark:text-gray-100 cursor-default font-bold'
         : 'hover:bg-gray-100 dark:hover:bg-gray-900 hover:text-gray-900 dark:hover:text-gray-100 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-900 focus:text-gray-900 dark:focus:text-gray-100'
-    const showHotkey = !this.props.loggedIn
+    const showHotkey = this.props.loggedIn && this.state.sites.length > 1
     return (
       <a
         href={
@@ -151,7 +151,7 @@ export default class SiteSwitcher extends React.Component {
             {domain}
           </span>
         </span>
-        {showHotkey ? index < 9 && <span>{index + 1}</span> : null}
+        {showHotkey && index < 9 ? <span>{index + 1}</span> : null}
       </a>
     )
   }
@@ -164,12 +164,14 @@ export default class SiteSwitcher extends React.Component {
         <React.Fragment>
           <div className="py-1">
             <a
-              href={`/${encodeURIComponent(this.props.site.domain)}/settings`}
+              href={`/${encodeURIComponent(
+                this.props.site.domain
+              )}/settings/general`}
               className="group flex items-center px-4 py-2 md:text-sm leading-5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-900 hover:text-gray-900 dark:hover:text-gray-100 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-900 focus:text-gray-900 dark:focus:text-gray-100"
               role="menuitem"
             >
               <Cog8ToothIcon className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-200 group-hover:text-gray-600 dark:group-hover:text-gray-400 group-focus:text-gray-500 dark:group-focus:text-gray-200" />
-              Site settings
+              Site Settings
             </a>
           </div>
           <div className="border-t border-gray-200 dark:border-gray-500"></div>
@@ -217,7 +219,7 @@ export default class SiteSwitcher extends React.Component {
             className="flex px-4 py-2 md:text-sm leading-5 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-900 hover:text-gray-900 dark:hover:text-gray-100 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-900 focus:text-gray-900 dark:focus:text-gray-100"
             role="menuitem"
           >
-            View all
+            View All
           </a>
         </React.Fragment>
       )
@@ -249,10 +251,10 @@ export default class SiteSwitcher extends React.Component {
 
         <Transition
           show={this.state.open}
-          enter="transition ease-out duration-100 transform"
+          enter="transition ease-out duration-100"
           enterFrom="opacity-0 scale-95"
           enterTo="opacity-100 scale-100"
-          leave="transition ease-in duration-75 transform"
+          leave="transition ease-in duration-75"
           leaveFrom="opacity-100 scale-100"
           leaveTo="opacity-0 scale-95"
         >

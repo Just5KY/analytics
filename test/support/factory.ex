@@ -1,5 +1,7 @@
 defmodule Plausible.Factory do
   use ExMachina.Ecto, repo: Plausible.Repo
+  require Plausible.Billing.Subscription.Status
+  alias Plausible.Billing.Subscription
 
   def user_factory(attrs) do
     pw = Map.get(attrs, :password, "password")
@@ -21,18 +23,31 @@ defmodule Plausible.Factory do
     }
   end
 
-  def site_factory do
-    domain = sequence(:domain, &"example-#{&1}.com")
+  def site_factory(attrs) do
+    # The é exercises unicode support in domain names
+    domain = sequence(:domain, &"é-#{&1}.example.com")
 
-    %Plausible.Site{
+    defined_memberships? =
+      Map.has_key?(attrs, :memberships) ||
+        Map.has_key?(attrs, :members) ||
+        Map.has_key?(attrs, :owner)
+
+    attrs = if defined_memberships?, do: attrs, else: Map.put_new(attrs, :members, [build(:user)])
+
+    site = %Plausible.Site{
       native_stats_start_at: ~N[2000-01-01 00:00:00],
       domain: domain,
       timezone: "UTC"
     }
+
+    merge_attributes(site, attrs)
   end
 
   def site_membership_factory do
-    %Plausible.Site.Membership{}
+    %Plausible.Site.Membership{
+      user: build(:user),
+      role: :viewer
+    }
   end
 
   def ch_session_factory do
@@ -85,12 +100,20 @@ defmodule Plausible.Factory do
       paddle_plan_id: sequence(:paddle_plan_id, &"plan-#{&1}"),
       cancel_url: "cancel.com",
       update_url: "cancel.com",
-      status: "active",
+      status: Subscription.Status.active(),
       next_bill_amount: "6.00",
       next_bill_date: Timex.today(),
       last_bill_date: Timex.today(),
       currency_code: "USD"
     }
+  end
+
+  def growth_subscription_factory do
+    build(:subscription, paddle_plan_id: "857097")
+  end
+
+  def business_subscription_factory do
+    build(:subscription, paddle_plan_id: "857087")
   end
 
   def enterprise_plan_factory do
@@ -99,22 +122,17 @@ defmodule Plausible.Factory do
       billing_interval: :monthly,
       monthly_pageview_limit: 1_000_000,
       hourly_api_request_limit: 3000,
-      site_limit: 100
+      site_limit: 100,
+      team_member_limit: 10
     }
   end
 
   def google_auth_factory do
     %Plausible.Site.GoogleAuth{
-      email: sequence(:google_auth_email, &"email-#{&1}@email.com"),
+      email: sequence(:google_auth_email, &"email-#{&1}@example.com"),
       refresh_token: "123",
       access_token: "123",
       expires: Timex.now() |> Timex.shift(days: 1)
-    }
-  end
-
-  def custom_domain_factory do
-    %Plausible.Site.CustomDomain{
-      domain: sequence(:custom_domain, &"domain-#{&1}.com")
     }
   end
 

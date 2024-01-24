@@ -1,4 +1,5 @@
 defmodule Plausible.Goal do
+  use Plausible
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -7,42 +8,52 @@ defmodule Plausible.Goal do
   schema "goals" do
     field :event_name, :string
     field :page_path, :string
-    field :currency, Ecto.Enum, values: Money.Currency.known_current_currencies()
 
-    many_to_many :funnels, Plausible.Funnel, join_through: Plausible.Funnel.Step
+    on_full_build do
+      field :currency, Ecto.Enum, values: Money.Currency.known_current_currencies()
+      many_to_many :funnels, Plausible.Funnel, join_through: Plausible.Funnel.Step
+    else
+      field :currency, :string, virtual: true, default: nil
+      field :funnels, {:array, :map}, virtual: true, default: []
+    end
 
     belongs_to :site, Plausible.Site
 
     timestamps()
   end
 
-  def revenue?(%__MODULE__{currency: currency}) do
-    !!currency
-  end
-
-  def valid_currencies do
-    Ecto.Enum.dump_values(__MODULE__, :currency)
-  end
-
-  def currency_options do
-    options =
-      for code <- valid_currencies() do
-        {"#{code} - #{Cldr.Currency.display_name!(code)}", code}
-      end
-
-    [{"Select reporting currency", nil}] ++ options
-  end
+  @fields [:id, :site_id, :event_name, :page_path] ++ on_full_build(do: [:currency], else: [])
 
   def changeset(goal, attrs \\ %{}) do
     goal
-    |> cast(attrs, [:id, :site_id, :event_name, :page_path, :currency])
+    |> cast(attrs, @fields)
     |> validate_required([:site_id])
     |> cast_assoc(:site)
+    |> update_leading_slash()
     |> validate_event_name_and_page_path()
     |> update_change(:event_name, &String.trim/1)
     |> update_change(:page_path, &String.trim/1)
+    |> unique_constraint(:event_name, name: :goals_event_name_unique)
+    |> unique_constraint(:page_path, name: :goals_page_path_unique)
     |> validate_length(:event_name, max: 120)
+    |> check_constraint(:event_name,
+      name: :check_event_name_or_page_path,
+      message: "cannot co-exist with page_path"
+    )
     |> maybe_drop_currency()
+  end
+
+  defp update_leading_slash(changeset) do
+    case get_field(changeset, :page_path) do
+      "/" <> _ ->
+        changeset
+
+      page_path when is_binary(page_path) ->
+        put_change(changeset, :page_path, "/" <> page_path)
+
+      _ ->
+        changeset
+    end
   end
 
   defp validate_event_name_and_page_path(changeset) do
@@ -66,7 +77,7 @@ defmodule Plausible.Goal do
   end
 
   defp maybe_drop_currency(changeset) do
-    if get_field(changeset, :page_path) do
+    if full_build?() and get_field(changeset, :page_path) do
       delete_change(changeset, :currency)
     else
       changeset
@@ -97,8 +108,12 @@ defimpl String.Chars, for: Plausible.Goal do
     "Visit " <> page_path
   end
 
-  def to_string(%{event_name: name}) when is_binary(name) do
+  def to_string(%{event_name: name, currency: nil}) when is_binary(name) do
     name
+  end
+
+  def to_string(%{event_name: name, currency: currency}) when is_binary(name) do
+    name <> " (#{currency})"
   end
 end
 

@@ -139,15 +139,15 @@ defmodule Plausible.TestUtils do
     |> Plug.Conn.fetch_session()
   end
 
+  def generate_usage_for(site, i, timestamp \\ NaiveDateTime.utc_now()) do
+    events = for _i <- 1..i, do: Factory.build(:pageview, timestamp: timestamp)
+    populate_stats(site, events)
+    :ok
+  end
+
   def populate_stats(site, events) do
     Enum.map(events, fn event ->
-      case event do
-        %Plausible.ClickhouseEventV2{} ->
-          Map.put(event, :site_id, site.id)
-
-        _ ->
-          Map.put(event, :site_id, site.id)
-      end
+      Map.put(event, :site_id, site.id)
     end)
     |> populate_stats
   end
@@ -196,7 +196,7 @@ defmodule Plausible.TestUtils do
 
   defp populate_imported_stats(events) do
     Enum.group_by(events, &Map.fetch!(&1, :table), &Map.delete(&1, :table))
-    |> Enum.map(fn {table, events} -> Plausible.Google.Buffer.insert_all(table, events) end)
+    |> Enum.map(fn {table, events} -> Plausible.Imported.Buffer.insert_all(table, events) end)
   end
 
   def relative_time(shifts) do
@@ -211,6 +211,10 @@ defmodule Plausible.TestUtils do
 
   def to_naive_truncate(%NaiveDateTime{} = naive) do
     NaiveDateTime.truncate(naive, :second)
+  end
+
+  def to_naive_truncate(%Date{} = date) do
+    NaiveDateTime.new!(date, ~T[00:00:00])
   end
 
   def eventually(expectation, wait_time_ms \\ 50, retries \\ 10) do
@@ -236,5 +240,9 @@ defmodule Plausible.TestUtils do
       200,
       10
     )
+  end
+
+  def random_ip() do
+    Enum.map_join(1..4, ".", fn _ -> Enum.random(1..254) end)
   end
 end

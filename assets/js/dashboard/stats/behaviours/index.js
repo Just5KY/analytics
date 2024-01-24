@@ -1,14 +1,25 @@
-import React, { Fragment, useState, useEffect } from 'react'
+import React, { Fragment, useState, useEffect, useCallback } from 'react'
 import { Menu, Transition } from '@headlessui/react'
 import { ChevronDownIcon } from '@heroicons/react/20/solid'
 import classNames from 'classnames'
 import * as storage from '../../util/storage'
 
 import GoalConversions, { specialTitleWhenGoalFilter } from './goal-conversions'
-import DeprecatedConversions from './deprecated-conversions'
 import Properties from './props'
-import Funnel from './funnel'
 import { FeatureSetupNotice } from '../../components/notice'
+import { SPECIAL_GOALS } from './goal-conversions'
+
+/*global BUILD_EXTRA*/
+/*global require*/
+function maybeRequire() {
+  if (BUILD_EXTRA) {
+    return require('../../extra/funnel')
+  } else {
+    return { default: null }
+  }
+}
+
+const Funnel = maybeRequire().default
 
 const ACTIVE_CLASS = 'inline-block h-5 text-indigo-700 dark:text-indigo-500 font-bold active-prop-heading truncate text-left'
 const DEFAULT_CLASS = 'hover:text-indigo-600 cursor-pointer truncate text-left'
@@ -24,7 +35,7 @@ export const sectionTitles = {
 }
 
 export default function Behaviours(props) {
-  const {site, query, currentUserRole} = props
+  const { site, query, currentUserRole } = props
   const adminAccess = ['owner', 'admin', 'super_admin'].includes(currentUserRole)
   const tabKey = `behavioursTab__${site.domain}`
   const funnelKey = `behavioursTabFunnel__${site.domain}`
@@ -32,7 +43,28 @@ export default function Behaviours(props) {
   const [mode, setMode] = useState(defaultMode())
 
   const [funnelNames, _setFunnelNames] = useState(site.funnels.map(({ name }) => name))
-  const [selectedFunnel, setSelectedFunnel] = useState(storage.getItem(funnelKey))
+  const [selectedFunnel, setSelectedFunnel] = useState(defaultSelectedFunnel())
+
+  const [showingPropsForGoalFilter, setShowingPropsForGoalFilter] = useState(false)
+
+  const onGoalFilterClick = useCallback((e) => {
+    const goalName = e.target.innerHTML
+    const isSpecialGoal = Object.keys(SPECIAL_GOALS).includes(goalName)
+    const isPageviewGoal = goalName.startsWith('Visit ')
+
+    if (!isSpecialGoal && !isPageviewGoal && enabledModes.includes(PROPS) && site.hasProps) {
+      setShowingPropsForGoalFilter(true)
+      setMode(PROPS)
+    }
+  }, [])
+
+  useEffect(() => {
+    const justRemovedGoalFilter = !query.filters.goal
+    if (mode === PROPS && justRemovedGoalFilter && showingPropsForGoalFilter) {
+      setShowingPropsForGoalFilter(false)
+      setMode(CONVERSIONS)
+    }
+  }, [!!query.filters.goal])
 
   useEffect(() => {
     setMode(defaultMode())
@@ -51,8 +83,22 @@ export default function Behaviours(props) {
     }
   }
 
+  function defaultSelectedFunnel() {
+    const stored = storage.getItem(funnelKey)
+    const storedExists = stored && site.funnels.some((f) => f.name === stored)
+
+    if (storedExists) {
+      return stored
+    } else if (site.funnels.length > 0) {
+      const firstAvailable = site.funnels[0].name
+
+      storage.setItem(funnelKey, firstAvailable)
+      return firstAvailable
+    }
+  }
+
   function hasFunnels() {
-    return site.funnels.length > 0
+    return site.funnels.length > 0 && site.funnelsAvailable
   }
 
   function tabFunnelPicker() {
@@ -67,11 +113,11 @@ export default function Behaviours(props) {
       <Transition
         as={Fragment}
         enter="transition ease-out duration-100"
-        enterFrom="transform opacity-0 scale-95"
-        enterTo="transform opacity-100 scale-100"
+        enterFrom="opacity-0 scale-95"
+        enterTo="opacity-100 scale-100"
         leave="transition ease-in duration-75"
-        leaveFrom="transform opacity-100 scale-100"
-        leaveTo="transform opacity-0 scale-95"
+        leaveFrom="opacity-100 scale-100"
+        leaveTo="opacity-0 scale-95"
       >
         <Menu.Items className="text-left origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 focus:outline-none z-10">
           <div className="py-1">
@@ -118,28 +164,26 @@ export default function Behaviours(props) {
       <div className="flex text-xs font-medium text-gray-500 dark:text-gray-400 space-x-2">
         {isEnabled(CONVERSIONS) && tabSwitcher(CONVERSIONS, 'Goals')}
         {isEnabled(PROPS) && tabSwitcher(PROPS, 'Properties')}
-        {isEnabled(FUNNELS) && (hasFunnels() ? tabFunnelPicker() : tabSwitcher(FUNNELS, 'Funnels'))}
+        {isEnabled(FUNNELS) && Funnel && (hasFunnels() ? tabFunnelPicker() : tabSwitcher(FUNNELS, 'Funnels'))}
       </div>
     )
   }
 
   function renderConversions() {
     if (site.hasGoals) {
-      if (site.flags.props) {
-        return <GoalConversions site={site} query={query} />
-      } else {
-        return <DeprecatedConversions site={site} query={query} />
-      }
+      return <GoalConversions site={site} query={query} onGoalFilterClick={onGoalFilterClick} />
     }
     else if (adminAccess) {
       return (
         <FeatureSetupNotice
           site={site}
           feature={CONVERSIONS}
-          shortFeatureName={'goals'}
           title={'Measure how often visitors complete specific actions'}
           info={'Goals allow you to track registrations, button clicks, form completions, external link clicks, file downloads, 404 error pages and more.'}
-          settingsLink={`/${encodeURIComponent(site.domain)}/settings/goals`}
+          callToAction={{
+            action: "Set up goals",
+            link: `/${encodeURIComponent(site.domain)}/settings/goals`
+          }}
           onHideAction={onHideAction(CONVERSIONS)}
         />
       )
@@ -148,16 +192,28 @@ export default function Behaviours(props) {
   }
 
   function renderFunnels() {
-    if (selectedFunnel) { return <Funnel site={site} query={query} funnelName={selectedFunnel} /> }
-    else if (adminAccess) {
+    if (Funnel === null) {
+      return featureUnavailable()
+    }
+    else if (Funnel && selectedFunnel && site.funnelsAvailable) {
+      return <Funnel site={site} query={query} funnelName={selectedFunnel} />
+    }
+    else if (Funnel && adminAccess) {
+      let callToAction
+      
+      if (site.funnelsAvailable) {
+        callToAction = {action: 'Set up funnels', link: `/${encodeURIComponent(site.domain)}/settings/funnels`}
+      } else {
+        callToAction = {action: 'Upgrade', link: '/billing/choose-plan'}
+      }
+
       return (
         <FeatureSetupNotice
           site={site}
           feature={FUNNELS}
-          shortFeatureName={'funnels'}
           title={'Follow the visitor journey from entry to conversion'}
           info={'Funnels allow you to analyze the user flow through your website, uncover possible issues, optimize your site and increase the conversion rate.'}
-          settingsLink={`/${encodeURIComponent(site.domain)}/settings/funnels`}
+          callToAction={callToAction}
           onHideAction={onHideAction(FUNNELS)}
         />
       )
@@ -166,17 +222,24 @@ export default function Behaviours(props) {
   }
 
   function renderProps() {
-    if (site.hasProps) {
+    if (site.hasProps && site.propsAvailable) {
       return <Properties site={site} query={query} />
     } else if (adminAccess) {
+      let callToAction
+
+      if (site.propsAvailable) {
+        callToAction = {action: 'Set up props', link: `/${encodeURIComponent(site.domain)}/settings/properties`}
+      } else {
+        callToAction = {action: 'Upgrade', link: '/billing/choose-plan'}
+      }
+
       return (
         <FeatureSetupNotice
           site={site}
           feature={PROPS}
-          shortFeatureName={'props'}
-          title={'No custom properties found'}
+          title={'Send custom data to create your own metrics'}
           info={'You can attach custom properties when sending a pageview or event. This allows you to create custom metrics and analyze stats we don\'t track automatically.'}
-          settingsLink={`/${encodeURIComponent(site.domain)}/settings/properties`}
+          callToAction={callToAction}
           onHideAction={onHideAction(PROPS)}
         />
       )
@@ -187,6 +250,14 @@ export default function Behaviours(props) {
     return (
       <div className="font-medium text-gray-500 dark:text-gray-400 py-12 text-center">
         No data yet
+      </div>
+    )
+  }
+
+  function featureUnavailable() {
+    return (
+      <div className="font-medium text-gray-500 dark:text-gray-400 py-12 text-center">
+        This feature is unavailable
       </div>
     )
   }
@@ -220,15 +291,20 @@ export default function Behaviours(props) {
   function getEnabledModes() {
     let enabledModes = []
 
-    if (site.conversionsEnabled) {
-      enabledModes.push(CONVERSIONS)
+    for (const feature of Object.keys(sectionTitles)) {
+      const isOptedOut = site[feature + 'OptedOut']
+      const isAvailable = site[feature + 'Available'] !== false
+
+      // If the feature is not supported by the site owner's subscription,
+      // it only makes sense to display the feature tab to the owner itself
+      // as only they can upgrade to make the feature available.
+      const callToActionIsMissing = !isAvailable && currentUserRole !== 'owner'
+
+      if (!isOptedOut && !callToActionIsMissing) {
+        enabledModes.push(feature)
+      }
     }
-    if (site.propsEnabled && site.flags.props) {
-      enabledModes.push(PROPS)
-    }
-    if (site.funnelsEnabled && !isRealtime() && site.flags.funnels) {
-      enabledModes.push(FUNNELS)
-    }
+
     return enabledModes
   }
 

@@ -47,7 +47,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.AuthTest do
 
   test "locked site - returns 402", %{conn: conn, api_key: api_key, user: user} do
     site = insert(:site, members: [user])
-    {1, _} = Plausible.Billing.SiteLocker.set_lock_status_for(user, true)
+    {:ok, 1} = Plausible.Billing.SiteLocker.set_lock_status_for(user, true)
 
     conn
     |> with_api_key(api_key)
@@ -67,6 +67,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.AuthTest do
   end
 
   describe "super admin access" do
+    @describetag :full_build_only
     setup %{user: user} do
       patch_env(:super_admin_user_ids, [user.id])
     end
@@ -88,7 +89,7 @@ defmodule PlausibleWeb.Api.ExternalStatsController.AuthTest do
       user: user
     } do
       site = insert(:site, members: [user])
-      {1, _} = Plausible.Billing.SiteLocker.set_lock_status_for(user, true)
+      {:ok, 1} = Plausible.Billing.SiteLocker.set_lock_status_for(user, true)
 
       conn
       |> with_api_key(api_key)
@@ -147,6 +148,23 @@ defmodule PlausibleWeb.Api.ExternalStatsController.AuthTest do
     |> assert_ok(%{
       "results" => %{"pageviews" => %{"value" => 0}}
     })
+  end
+
+  test "returns HTTP 402 when user is on a growth plan", %{
+    conn: conn,
+    user: user,
+    api_key: api_key
+  } do
+    insert(:growth_subscription, user: user)
+    site = insert(:site, members: [user])
+
+    conn
+    |> with_api_key(api_key)
+    |> get("/api/v1/stats/aggregate", %{"site_id" => site.domain, "metrics" => "pageviews"})
+    |> assert_error(
+      402,
+      "Stats API is part of the Plausible Business plan. To get access to this feature, please upgrade your account."
+    )
   end
 
   defp with_api_key(conn, api_key) do

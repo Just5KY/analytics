@@ -66,8 +66,9 @@ function ComparisonModeOption({ label, value, isCurrentlySelected, updateMode, s
   }
 
   const render = ({ active }) => {
-    const buttonClass = classNames("px-4 py-2 w-full text-left font-medium text-sm dark:text-white cursor-pointer", {
+    const buttonClass = classNames("px-4 py-2 w-full text-left text-sm dark:text-white", {
       "bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100": active,
+      "font-medium": !isCurrentlySelected,
       "font-bold": isCurrentlySelected,
     })
 
@@ -90,8 +91,9 @@ function MatchDayOfWeekInput({ history, query, site }) {
   }
 
   const buttonClass = (hover, selected) =>
-    classNames("px-4 py-2 w-full text-left font-medium text-sm dark:text-white cursor-pointer", {
+    classNames("px-4 py-2 w-full text-left text-sm dark:text-white cursor-pointer", {
       "bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100": hover,
+      "font-medium": !selected,
       "font-bold": selected,
     })
 
@@ -166,11 +168,11 @@ const ComparisonInput = function({ site, query, history }) {
             <Transition
               as={Fragment}
               enter="transition ease-out duration-100"
-              enterFrom="transform opacity-0 scale-95"
-              enterTo="transform opacity-100 scale-100"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
               leave="transition ease-in duration-75"
-              leaveFrom="transform opacity-100 scale-100"
-              leaveTo="transform opacity-0 scale-95">
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95">
               <Menu.Items className="py-1 text-left origin-top-right absolute right-0 mt-2 w-56 rounded-md shadow-lg bg-white dark:bg-gray-800 ring-1 ring-black ring-opacity-5 focus:outline-none z-10" static>
                 { Object.keys(COMPARISON_MODES).map((key) => ComparisonModeOption({ label: COMPARISON_MODES[key], value: key, isCurrentlySelected: key == query.comparison, updateMode, setUiMode })) }
                 { query.comparison !== "custom" && <span>
@@ -181,7 +183,7 @@ const ComparisonInput = function({ site, query, history }) {
             </Transition>
 
             { uiMode == "datepicker" &&
-            <div className="h-0 absolute">
+            <div className="h-0 md:absolute">
               <Flatpickr ref={calendar} options={flatpickrOptions} className="invisible" />
             </div> }
           </Menu>
